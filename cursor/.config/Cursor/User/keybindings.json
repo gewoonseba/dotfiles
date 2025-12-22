@@ -250,5 +250,17 @@
   {
     "key": "alt+ctrl+w",
     "command": "workbench.action.closeEditorsInOtherGroups"
+  },
+  {
+    "key": "ctrl+w",
+    "command": "-workbench.action.switchWindow"
+  },
+  {
+    "key": "ctrl+w",
+    "command": "workbench.action.closeActiveEditor"
+  },
+  {
+    "key": "cmd+w",
+    "command": "-workbench.action.closeActiveEditor"
   }
 ]
