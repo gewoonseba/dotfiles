@@ -1,7 +1,8 @@
 #!/bin/bash
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EXTENSIONS_FILE="$SCRIPT_DIR/extensions.txt"
+DOTFILES_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+EXTENSIONS_FILE="$DOTFILES_DIR/cursor-extensions/extensions.txt"
 
 if ! command -v cursor &> /dev/null; then
     echo "Error: cursor command not found. Is Cursor installed?"
@@ -16,4 +17,4 @@ echo "Total extensions: $(wc -l < "$EXTENSIONS_FILE")"
 echo ""
 echo "Don't forget to commit the changes:"
 echo "  git add cursor-extensions/extensions.txt"
-echo "  git commit -m 'Update Cursor extensions list'"
+echo "  git commit -m 'cursor: Update Cursor extensions list'"

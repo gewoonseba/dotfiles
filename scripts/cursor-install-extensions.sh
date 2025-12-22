@@ -1,7 +1,8 @@
 #!/bin/bash
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EXTENSIONS_FILE="$SCRIPT_DIR/extensions.txt"
+DOTFILES_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+EXTENSIONS_FILE="$DOTFILES_DIR/cursor-extensions/extensions.txt"
 
 if [ ! -f "$EXTENSIONS_FILE" ]; then
     echo "Error: extensions.txt not found at $EXTENSIONS_FILE"
