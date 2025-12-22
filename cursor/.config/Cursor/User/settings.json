@@ -76,6 +76,5 @@
   "githubPullRequests.pullBranch": "never",
   "cursor.composer.usageSummaryDisplay": "always",
   "indentRainbow.indicatorStyle": "light",
-  "indentRainbow.lightIndicatorStyleLineWidth": 2,
-  "workbench.colorTheme": "Cursor Dark Midnight"
+  "indentRainbow.lightIndicatorStyleLineWidth": 2
 }

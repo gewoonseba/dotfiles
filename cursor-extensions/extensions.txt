@@ -1,13 +1,14 @@
 anysphere.cursorpyright
 bradlc.vscode-tailwindcss
+catppuccin.catppuccin-vsc
 charliermarsh.ruff
 cipchk.cssrem
 dbaeumer.vscode-eslint
+enkia.tokyo-night
 esbenp.prettier-vscode
 kamikillerto.vscode-colorize
 kylinideteam.gitlens
 lokalise.i18n-ally
-miguelsolorio.symbols
 ms-python.debugpy
 ms-python.python
 ms-toolsai.jupyter
@@ -15,8 +16,5 @@ ms-toolsai.jupyter-renderers
 ms-toolsai.vscode-jupyter-cell-tags
 ms-toolsai.vscode-jupyter-slideshow
 nicoespeon.abracadabra
-nidu.copy-json-path
-oderwat.indent-rainbow
 viijay-kr.react-ts-css
 vitest.explorer
-
