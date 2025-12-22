@@ -1,0 +1,81 @@
+{
+  "liveServer.settings.donotShowInfoMsg": true,
+  "editor.accessibilitySupport": "off",
+  "files.autoSave": "onFocusChange",
+  "editor.linkedEditing": true,
+  "git.autofetch": true,
+  "javascript.preferences.importModuleSpecifier": "non-relative",
+  "typescript.preferences.importModuleSpecifier": "non-relative",
+  "typescript.updateImportsOnFileMove.enabled": "always",
+  "explorer.confirmDragAndDrop": false,
+  "security.workspace.trust.untrustedFiles": "open",
+  "editor.tabSize": 2,
+  "editor.formatOnSave": true,
+  "[javascript]": {
+    "editor.defaultFormatter": null
+  },
+  "javascript.updateImportsOnFileMove.enabled": "always",
+  "liveServer.settings.donotVerifyTags": true,
+  "editor.fontSize": 14,
+  "editor.fontFamily": "'Cartograph CF',SF Mono, Menlo, Monaco, 'Courier New', monospace",
+  "git.openRepositoryInParentFolders": "never",
+  "git.enableSmartCommit": true,
+  "color-highlight.markerType": "dot-before",
+  "git.confirmSync": false,
+  "css.lint.unknownAtRules": "ignore",
+  "editor.codeActions.triggerOnFocusChange": true,
+  "editor.fontLigatures": true,
+  "terminal.integrated.fontSize": 13,
+  "workbench.preferredDarkColorTheme": "Night Owl",
+  "workbench.preferredHighContrastColorTheme": "Cursor Dark High Contrast",
+  "workbench.preferredLightColorTheme": "Night Owl Light",
+  "cursor.composer.shouldChimeAfterChatFinishes": true,
+  "lldb.library": "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/LLDB",
+  "lldb.launch.expressions": "native",
+  "workbench.iconTheme": "symbols",
+  "typescript.updateImportsOnPaste.enabled": true,
+  "[astro]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "editor.cursorBlinking": "smooth",
+  "editor.smoothScrolling": true,
+  "editor.cursorSmoothCaretAnimation": "on",
+  "terminal.integrated.smoothScrolling": true,
+  "workbench.list.smoothScrolling": true,
+  "cursor.composer.shouldAllowCustomModes": true,
+  "cursor.terminal.usePreviewBox": true,
+  "diffEditor.experimental.showMoves": true,
+  "explorer.confirmDelete": false,
+  "git.ignoreRebaseWarning": true,
+  "git.blame.editorDecoration.enabled": false,
+  "cursor.agent_layout_browser_beta_setting": true,
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "Key Promoter.suggestKeybindingCreation": false,
+  "Key Promoter.ignoredCommands": [
+    "type",
+    "workbench.action.quickOpen",
+    "workbench.action.files.save",
+    "workbench.action.Editor",
+    "workbench.action.navigateBack",
+    "editor.action.clipboardPasteAction"
+  ],
+  "gitlens.mode.active": "zen",
+  "debug.toolBarLocation": "docked",
+  "colorize.colorized_variables": [
+    "CSS",
+
+  ],
+  "diffEditor.renderSideBySide": true,
+  "githubPullRequests.remotes": [
+    "origin",
+    "upstream",
+    ""
+  ],
+  "githubPullRequests.pullBranch": "never",
+  "cursor.composer.usageSummaryDisplay": "always",
+  "indentRainbow.indicatorStyle": "light",
+  "indentRainbow.lightIndicatorStyleLineWidth": 2,
+  "workbench.colorTheme": "Cursor Dark Midnight"
+}
