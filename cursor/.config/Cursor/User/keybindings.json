@@ -1,11 +1,6 @@
 // Place your key bindings in this file to override the defaults
 [
   {
-    "key": "ctrl+i",
-    "command": "editor.action.formatDocument",
-    "when": "editorHasDocumentFormattingProvider && editorTextFocus && !editorReadonly && !inCompositeEditor"
-  },
-  {
     "key": "shift+alt+f",
     "command": "-editor.action.formatDocument",
     "when": "editorHasDocumentFormattingProvider && editorTextFocus && !editorReadonly && !inCompositeEditor"
@@ -16,7 +11,7 @@
     "when": "inSearchEditor"
   },
   {
-    "key": "shift+cmd+l",
+    "key": "shift+ctrl+l",
     "command": "-selectAllSearchEditorMatches",
     "when": "inSearchEditor"
   },
@@ -26,7 +21,7 @@
     "when": "editorFocus"
   },
   {
-    "key": "shift+cmd+l",
+    "key": "shift+ctrl+l",
     "command": "-editor.action.selectHighlights",
     "when": "editorFocus"
   },
@@ -36,12 +31,12 @@
     "when": "fileMatchOrMatchFocus && searchViewletVisible"
   },
   {
-    "key": "shift+cmd+l",
+    "key": "shift+ctrl+l",
     "command": "-addCursorsAtSearchResults",
     "when": "fileMatchOrMatchFocus && searchViewletVisible"
   },
   {
-    "key": "cmd+n",
+    "key": "ctrl+n",
     "command": "-workbench.action.files.newUntitledFile"
   },
   {
@@ -49,36 +44,36 @@
     "command": "editor.emmet.action.wrapWithAbbreviation"
   },
   {
-    "key": "alt+cmd+w",
+    "key": "alt+ctrl+w",
     "command": "-toggleSearchEditorWholeWord",
     "when": "inSearchEditor && searchInputBoxFocus"
   },
   {
-    "key": "alt+cmd+w",
+    "key": "alt+ctrl+w",
     "command": "-workbench.action.terminal.toggleFindWholeWord",
     "when": "terminalFindVisible && terminalHasBeenCreated || terminalFindVisible && terminalProcessSupported"
   },
   {
-    "key": "alt+cmd+w",
+    "key": "alt+ctrl+w",
     "command": "-toggleFindWholeWord",
     "when": "editorFocus"
   },
   {
-    "key": "alt+cmd+w",
+    "key": "alt+ctrl+w",
     "command": "-toggleSearchWholeWord",
     "when": "searchViewletFocus"
   },
   {
-    "key": "cmd+i",
+    "key": "ctrl+i",
     "command": "composerMode.agent"
   },
   {
-    "key": "cmd+backspace",
+    "key": "ctrl+backspace",
     "command": "editor.action.deleteLines",
     "when": "textInputFocus && !editorReadonly"
   },
   {
-    "key": "shift+cmd+k",
+    "key": "shift+ctrl+k",
     "command": "-editor.action.deleteLines",
     "when": "textInputFocus && !editorReadonly"
   },
@@ -91,64 +86,59 @@
     "when": "terminalFocus"
   },
   {
-    "key": "cmd+\\",
+    "key": "ctrl+\\",
     "command": "-workbench.action.terminal.splitActiveTab",
     "when": "terminalProcessSupported && terminalTabsFocus"
   },
   {
-    "key": "cmd+\\",
+    "key": "ctrl+\\",
     "command": "-workbench.action.splitEditor"
   },
   {
-    "key": "cmd+\\",
+    "key": "ctrl+\\",
     "command": "-workbench.action.terminal.split",
     "when": "terminalFocus && terminalProcessSupported || terminalFocus && terminalWebExtensionContributedProfile"
   },
   {
-    "key": "cmd+\\",
+    "key": "ctrl+\\",
     "command": "workbench.action.toggleSidebarVisibility"
   },
   {
-    "key": "cmd+b",
+    "key": "ctrl+b",
     "command": "-workbench.action.toggleSidebarVisibility"
   },
   {
-    "key": "shift+cmd+\\",
+    "key": "shift+ctrl+\\",
     "command": "workbench.action.toggleAuxiliaryBar"
   },
   {
-    "key": "alt+cmd+b",
+    "key": "alt+ctrl+b",
     "command": "-workbench.action.toggleAuxiliaryBar"
   },
   {
-    "key": "alt+cmd+w",
+    "key": "alt+ctrl+w",
     "command": "workbench.action.closeOtherEditors"
   },
   {
-    "key": "alt+cmd+t",
+    "key": "alt+ctrl+t",
     "command": "-workbench.action.closeOtherEditors"
   },
   {
-    "key": "alt+cmd+w",
+    "key": "alt+ctrl+w",
     "command": "-composer.toggleFindWholeWord",
     "when": "composerFindWidgetFocused"
   },
   {
-    "key": "shift+cmd+k",
+    "key": "shift+ctrl+k",
     "command": "workbench.action.closeOtherEditors"
   },
   {
-      "key": "ctrl+tab",
-      "command": "workbench.action.nextEditor"
+    "key": "ctrl+tab",
+    "command": "workbench.action.nextEditor"
   },
   {
-      "key": "ctrl+shift+tab",
-      "command": "workbench.action.previousEditor"
-  },
-  {
-    "key": "cmd+left",
-    "command": "workbench.action.navigateBack",
-    "when": "canNavigateBack"
+    "key": "ctrl+shift+tab",
+    "command": "workbench.action.previousEditor"
   },
   {
     "key": "ctrl+-",
@@ -156,109 +146,94 @@
     "when": "canNavigateBack"
   },
   {
-    "key": "cmd+right",
-    "command": "workbench.action.navigateForward",
-    "when": "canNavigateForward"
-  },
-  {
     "key": "ctrl+shift+-",
     "command": "-workbench.action.navigateForward",
     "when": "canNavigateForward"
   },
   {
-    "key": "shift+cmd+g",
+    "key": "shift+ctrl+g",
     "command": "-editor.action.previousMatchFindAction",
     "when": "editorFocus"
   },
   {
-    "key": "shift+cmd+g",
+    "key": "shift+ctrl+g",
     "command": "-workbench.action.terminal.findPrevious",
     "when": "terminalFindFocused && terminalHasBeenCreated || terminalFindFocused && terminalProcessSupported || terminalFocusInAny && terminalHasBeenCreated || terminalFocusInAny && terminalProcessSupported"
   },
   {
-    "key": "shift+cmd+g",
+    "key": "shift+ctrl+g",
     "command": "-workbench.action.terminal.openDetectedLink",
     "when": "accessibleViewIsShown && terminalHasBeenCreated && accessibleViewCurrentProviderId == 'terminal'"
   },
   {
-    "key": "shift+cmd+g",
+    "key": "shift+ctrl+g",
     "command": "workbench.view.scm",
     "when": "workbench.scm.active && !gitlens:disabled && config.gitlens.keymap == 'chorded'"
   },
   {
-    "key": "ctrl+shift+g",
-    "command": "-workbench.view.scm",
-    "when": "workbench.scm.active && !gitlens:disabled && config.gitlens.keymap == 'chorded'"
-  },
-  {
-    "key": "shift+cmd+g",
+    "key": "shift+ctrl+g",
     "command": "workbench.view.scm",
     "when": "workbench.scm.active"
   },
   {
-    "key": "ctrl+shift+g",
-    "command": "-workbench.view.scm",
-    "when": "workbench.scm.active"
-  },
-  {
-    "key": "cmd+r cmd+\\",
+    "key": "ctrl+r ctrl+\\",
     "command": "-workbench.action.splitEditorRight"
   },
   {
-    "key": "shift+cmd+w",
+    "key": "shift+ctrl+w",
     "command": "-workbench.action.closeWindow"
   },
   {
-    "key": "shift+cmd+w",
+    "key": "shift+ctrl+w",
     "command": "workbench.action.closeEditorsAndGroup"
   },
   {
-    "key": "cmd+o",
+    "key": "ctrl+o",
     "command": "-workbench.action.files.openFile",
     "when": "false"
   },
   {
-    "key": "cmd+o",
+    "key": "ctrl+o",
     "command": "-workbench.action.files.openFolderViaWorkspace",
     "when": "!openFolderWorkspaceSupport && workbenchState == 'workspace'"
   },
   {
-    "key": "cmd+o",
+    "key": "ctrl+o",
     "command": "-workbench.action.files.openFileFolder",
     "when": "isMacNative && openFolderWorkspaceSupport"
   },
   {
-    "key": "cmd+o",
+    "key": "ctrl+o",
     "command": "-workbench.action.files.openLocalFileFolder",
     "when": "remoteFileDialogVisible"
   },
   {
-    "key": "shift+cmd+o",
+    "key": "shift+ctrl+o",
     "command": "editor.action.accessibleViewGoToSymbol",
     "when": "accessibilityHelpIsShown && accessibleViewGoToSymbolSupported || accessibleViewGoToSymbolSupported && accessibleViewIsShown"
   },
   {
-    "key": "shift+cmd+o",
+    "key": "shift+ctrl+o",
     "command": "-editor.action.accessibleViewGoToSymbol",
     "when": "accessibilityHelpIsShown && accessibleViewGoToSymbolSupported || accessibleViewGoToSymbolSupported && accessibleViewIsShown"
   },
   {
-    "key": "shift+cmd+o",
+    "key": "shift+ctrl+o",
     "command": "workbench.action.gotoSymbol",
     "when": "!accessibilityHelpIsShown && !accessibleViewIsShown"
   },
   {
-    "key": "shift+cmd+o",
+    "key": "shift+ctrl+o",
     "command": "-workbench.action.gotoSymbol",
     "when": "!accessibilityHelpIsShown && !accessibleViewIsShown"
   },
   {
-    "key": "shift+cmd+o",
+    "key": "shift+ctrl+o",
     "command": "workbench.action.terminal.openDetectedLink",
     "when": "terminalFocus && terminalHasBeenCreated"
   },
   {
-    "key": "shift+cmd+o",
+    "key": "shift+ctrl+o",
     "command": "-workbench.action.terminal.openDetectedLink",
     "when": "terminalFocus && terminalHasBeenCreated"
   },
@@ -273,8 +248,7 @@
     "when": "editorTextFocus"
   },
   {
-    "key": "alt+cmd+w",
+    "key": "alt+ctrl+w",
     "command": "workbench.action.closeEditorsInOtherGroups"
   }
 ]
-
