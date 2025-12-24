@@ -262,5 +262,30 @@
   {
     "key": "cmd+w",
     "command": "-workbench.action.closeActiveEditor"
+  },
+  {
+    "key": "ctrl+right",
+    "command": "-quickInput.acceptInBackground",
+    "when": "cursorAtEndOfQuickInputBox && inQuickInput && quickInputType == 'quickPick' || inQuickInput && !inputFocus && quickInputType == 'quickPick'"
+  },
+  {
+    "key": "ctrl+[",
+    "command": "workbench.action.navigateBack",
+    "when": "canNavigateBack"
+  },
+  {
+    "key": "browserback",
+    "command": "-workbench.action.navigateBack",
+    "when": "canNavigateBack"
+  },
+  {
+    "key": "ctrl+]",
+    "command": "workbench.action.navigateForward",
+    "when": "canNavigateForward"
+  },
+  {
+    "key": "browserforward",
+    "command": "-workbench.action.navigateForward",
+    "when": "canNavigateForward"
   }
 ]
