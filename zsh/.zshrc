@@ -69,7 +69,10 @@ eval "$(starship init zsh)"
 eval "$(zoxide init zsh)"
 
 # Keybindings
-bindkey '^I' autosuggest-accept 
+bindkey '^I' autosuggest-accept
 bindkey '^[[A' history-search-backward
 bindkey '^[[B' history-search-forward
+
+# Setup nvm
+source /usr/share/nvm/init-nvm.sh
 
