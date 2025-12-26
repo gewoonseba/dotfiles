@@ -1,3 +1,5 @@
+export PATH=$PATH:$HOME/.local/bin
+
 # Aliases, taken from ~/.local/share/omarchy/default/bash/aliases
 
 # File system

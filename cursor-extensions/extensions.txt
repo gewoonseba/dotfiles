@@ -16,5 +16,6 @@ ms-toolsai.jupyter-renderers
 ms-toolsai.vscode-jupyter-cell-tags
 ms-toolsai.vscode-jupyter-slideshow
 nicoespeon.abracadabra
+tamasfe.even-better-toml
 viijay-kr.react-ts-css
 vitest.explorer
