@@ -1,7 +1,14 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DOTFILES_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Standard symlink resolution
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+DOTFILES_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 EXTENSIONS_FILE="$DOTFILES_DIR/cursor-extensions/extensions.txt"
 
 if ! command -v cursor &> /dev/null; then
@@ -10,11 +17,46 @@ if ! command -v cursor &> /dev/null; then
 fi
 
 echo "Updating extensions list..."
-cursor --list-extensions > "$EXTENSIONS_FILE"
+
+# Backup old list
+if [ -f "$EXTENSIONS_FILE" ]; then
+    cp "$EXTENSIONS_FILE" "$EXTENSIONS_FILE.bak"
+fi
+
+# Update the list
+cursor --list-extensions | sort > "$EXTENSIONS_FILE"
 
 echo "Extensions list updated at: $EXTENSIONS_FILE"
 echo "Total extensions: $(wc -l < "$EXTENSIONS_FILE")"
+
+# Show diff if backup exists
+if [ -f "$EXTENSIONS_FILE.bak" ]; then
+    echo ""
+    echo "=== Changes ==="
+    
+    # Show added extensions
+    added=$(comm -13 "$EXTENSIONS_FILE.bak" "$EXTENSIONS_FILE")
+    if [ -n "$added" ]; then
+        echo "Added:"
+        echo "$added" | sed 's/^/  + /'
+    fi
+    
+    # Show removed extensions
+    removed=$(comm -23 "$EXTENSIONS_FILE.bak" "$EXTENSIONS_FILE")
+    if [ -n "$removed" ]; then
+        echo "Removed:"
+        echo "$removed" | sed 's/^/  - /'
+    fi
+    
+    if [ -z "$added" ] && [ -z "$removed" ]; then
+        echo "No changes."
+    fi
+    
+    rm "$EXTENSIONS_FILE.bak"
+fi
+
 echo ""
 echo "Don't forget to commit the changes:"
+echo "  cd $DOTFILES_DIR"
 echo "  git add cursor-extensions/extensions.txt"
-echo "  git commit -m 'cursor: Update Cursor extensions list'"
+echo "  git commit -m 'Update Cursor extensions list'"

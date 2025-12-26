@@ -1,7 +1,14 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DOTFILES_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Standard symlink resolution
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+DOTFILES_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 EXTENSIONS_FILE="$DOTFILES_DIR/cursor-extensions/extensions.txt"
 
 if ! command -v cursor &> /dev/null; then
@@ -17,34 +24,23 @@ fi
 echo "Syncing Cursor extensions..."
 echo ""
 
-# Get currently installed extensions
-mapfile -t INSTALLED < <(cursor --list-extensions)
+# Get currently installed extensions (as string, not array)
+INSTALLED=$(cursor --list-extensions)
 
 # Get extensions from file (skip empty lines and comments)
-mapfile -t DESIRED < <(grep -v '^#' "$EXTENSIONS_FILE" | grep -v '^[[:space:]]*$')
-
-# Convert arrays to associative arrays for easier lookup
-declare -A installed_map
-declare -A desired_map
-
-for ext in "${INSTALLED[@]}"; do
-    installed_map["$ext"]=1
-done
-
-for ext in "${DESIRED[@]}"; do
-    desired_map["$ext"]=1
-done
+DESIRED=$(grep -v '^#' "$EXTENSIONS_FILE" | grep -v '^[[:space:]]*$')
 
 # Install missing extensions
 echo "=== Installing missing extensions ==="
 installed_count=0
-for ext in "${DESIRED[@]}"; do
-    if [[ ! ${installed_map["$ext"]} ]]; then
+while IFS= read -r ext; do
+    [ -z "$ext" ] && continue
+    if ! echo "$INSTALLED" | grep -qx "$ext"; then
         echo "Installing: $ext"
         cursor --install-extension "$ext"
-        ((installed_count++))
+        installed_count=$((installed_count + 1))
     fi
-done
+done <<< "$DESIRED"
 
 if [ $installed_count -eq 0 ]; then
     echo "No extensions to install."
@@ -54,13 +50,14 @@ echo ""
 # Uninstall extensions not in the list
 echo "=== Removing extensions not in list ==="
 removed_count=0
-for ext in "${INSTALLED[@]}"; do
-    if [[ ! ${desired_map["$ext"]} ]]; then
+while IFS= read -r ext; do
+    [ -z "$ext" ] && continue
+    if ! echo "$DESIRED" | grep -qx "$ext"; then
         echo "Uninstalling: $ext"
         cursor --uninstall-extension "$ext"
-        ((removed_count++))
+        removed_count=$((removed_count + 1))
     fi
-done
+done <<< "$INSTALLED"
 
 if [ $removed_count -eq 0 ]; then
     echo "No extensions to remove."
