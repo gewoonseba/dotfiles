@@ -1,0 +1,75 @@
+# Aliases, taken from ~/.local/share/omarchy/default/bash/aliases
+
+# File system
+if command -v eza &> /dev/null; then
+  alias ls='eza -lh --group-directories-first --icons=auto'
+  alias lsa='ls -a'
+  alias lt='eza --tree --level=2 --long --icons --git'
+  alias lta='lt -a'
+fi
+
+alias ff="fzf --preview 'bat --style=numbers --color=always {}'"
+
+if command -v zoxide &> /dev/null; then
+  alias cd="zd"
+  zd() {
+    if [ $# -eq 0 ]; then
+      builtin cd ~ && return
+    elif [ -d "$1" ]; then
+      builtin cd "$1"
+    else
+      z "$@" && printf "\U000F17A9 " && pwd || echo "Error: Directory not found"
+    fi
+  }
+fi
+
+open() {
+  xdg-open "$@" >/dev/null 2>&1 &
+}
+
+# Directories
+alias ..='cd ..'
+alias ...='cd ../..'
+alias ....='cd ../../..'
+
+# Git
+alias g='git'
+alias gcm='git commit -m'
+alias gcam='git commit -a -m'
+alias gcad='git commit -a --amend'
+
+# Historty
+HISTFILE=~/.zsh_history
+HISTSIZE=50000
+SAVEHIST=50000
+HISTDUP=erase
+
+
+setopt appendhistory
+setopt sharehistory
+setopt hist_ignore_all_dups
+setopt hist_save_no_dups
+setopt hist_ignore_dups
+setopt hist_find_no_dups
+
+# Set up fzf key bindings and fuzzy completion
+source <(fzf --zsh)
+
+# Setup zinit package manager
+source /usr/share/zinit/zinit.zsh
+
+# Setup zinit plugins
+zinit light zsh-users/zsh-syntax-highlighting
+zinit light zsh-users/zsh-autosuggestions
+zinit light zsh-users/zsh-completions
+autoload -U compinit && compinit
+
+# Setup Starship and zoxide
+eval "$(starship init zsh)"
+eval "$(zoxide init zsh)"
+
+# Keybindings
+bindkey '^I' autosuggest-accept 
+bindkey '^[[A' history-search-backward
+bindkey '^[[B' history-search-forward
+
