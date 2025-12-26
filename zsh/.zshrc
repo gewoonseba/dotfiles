@@ -58,7 +58,10 @@ setopt hist_find_no_dups
 source <(fzf --zsh)
 
 # Setup zinit package manager
-source /usr/share/zinit/zinit.zsh
+ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
+[ ! -d $ZINIT_HOME ] && mkdir -p "$(dirname $ZINIT_HOME)"
+[ ! -d $ZINIT_HOME/.git ] && git clone https://github.com/zdharma-continuum/zinit.git "$ZINIT_HOME"
+source "${ZINIT_HOME}/zinit.zsh"
 
 # Setup zinit plugins
 zinit light zsh-users/zsh-syntax-highlighting
@@ -71,10 +74,13 @@ eval "$(starship init zsh)"
 eval "$(zoxide init zsh)"
 
 # Keybindings
-bindkey '^I' autosuggest-accept
 bindkey '^[[A' history-search-backward
 bindkey '^[[B' history-search-forward
 
 # Setup nvm
-source /usr/share/nvm/init-nvm.sh
+export NVM_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/nvm"
+[ ! -d $NVM_DIR ] && mkdir -p "$NVM_DIR"
+[ ! -s "$NVM_DIR/nvm.sh" ] && curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+source "$NVM_DIR/nvm.sh"
 
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
