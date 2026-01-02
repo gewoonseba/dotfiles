@@ -17,7 +17,7 @@
   "javascript.updateImportsOnFileMove.enabled": "always",
   "liveServer.settings.donotVerifyTags": true,
   "editor.fontSize": 14,
-  "editor.fontFamily": "'Cartograph CF',SF Mono, Menlo, Monaco, 'Courier New', monospace",
+  "editor.fontFamily": "'JetBrainsMono Nerd Font',SF Mono, Menlo, Monaco, 'Courier New', monospace",
   "git.openRepositoryInParentFolders": "never",
   "git.enableSmartCommit": true,
   "color-highlight.markerType": "dot-before",
