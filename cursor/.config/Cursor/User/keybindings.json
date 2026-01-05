@@ -68,7 +68,7 @@
     "command": "composerMode.agent"
   },
   {
-    "key": "ctrl+backspace",
+    "key": "cmd+backspace",
     "command": "editor.action.deleteLines",
     "when": "textInputFocus && !editorReadonly"
   },
@@ -100,7 +100,7 @@
     "when": "terminalFocus && terminalProcessSupported || terminalFocus && terminalWebExtensionContributedProfile"
   },
   {
-    "key": "ctrl+\\",
+    "key": "cmd+\\",
     "command": "workbench.action.toggleSidebarVisibility"
   },
   {
@@ -108,7 +108,7 @@
     "command": "-workbench.action.toggleSidebarVisibility"
   },
   {
-    "key": "shift+ctrl+\\",
+    "key": "shift+cmd+\\",
     "command": "workbench.action.toggleAuxiliaryBar"
   },
   {
@@ -116,7 +116,7 @@
     "command": "-workbench.action.toggleAuxiliaryBar"
   },
   {
-    "key": "alt+ctrl+w",
+    "key": "shift+cmd+k",
     "command": "workbench.action.closeOtherEditors"
   },
   {
@@ -256,14 +256,6 @@
     "command": "-workbench.action.switchWindow"
   },
   {
-    "key": "ctrl+w",
-    "command": "workbench.action.closeActiveEditor"
-  },
-  {
-    "key": "cmd+w",
-    "command": "-workbench.action.closeActiveEditor"
-  },
-  {
     "key": "ctrl+right",
     "command": "-quickInput.acceptInBackground",
     "when": "cursorAtEndOfQuickInputBox && inQuickInput && quickInputType == 'quickPick' || inQuickInput && !inputFocus && quickInputType == 'quickPick'"
@@ -287,5 +279,10 @@
     "key": "browserforward",
     "command": "-workbench.action.navigateForward",
     "when": "canNavigateForward"
+  },
+  {
+    "key": "shift+cmd+k",
+    "command": "-editor.action.deleteLines",
+    "when": "textInputFocus && !editorReadonly"
   }
 ]
