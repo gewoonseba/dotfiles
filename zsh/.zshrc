@@ -88,4 +88,3 @@ source "$NVM_DIR/nvm.sh"
 # Setup javm
 command -v javm &> /dev/null || curl -fsSL https://javm.dev/install.sh | bash
 command -v javm &> /dev/null && eval "$(javm init bash)"
-

@@ -1,4 +1,5 @@
 {
+  "workbench.colorTheme": "Everforest Dark",
   "liveServer.settings.donotShowInfoMsg": true,
   "editor.accessibilitySupport": "off",
   "files.autoSave": "onFocusChange",
@@ -47,7 +48,7 @@
   "diffEditor.experimental.showMoves": true,
   "explorer.confirmDelete": false,
   "git.ignoreRebaseWarning": true,
-  "git.blame.editorDecoration.enabled": false,
+  "git.blame.editorDecoration.enabled": true,
   "cursor.agent_layout_browser_beta_setting": true,
   "[typescript]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode"
@@ -63,18 +64,13 @@
   ],
   "gitlens.mode.active": "zen",
   "debug.toolBarLocation": "docked",
-  "colorize.colorized_variables": [
-    "CSS",
-
-  ],
+  "colorize.colorized_variables": ["CSS"],
   "diffEditor.renderSideBySide": true,
-  "githubPullRequests.remotes": [
-    "origin",
-    "upstream",
-    ""
-  ],
+  "githubPullRequests.remotes": ["origin", "upstream", ""],
   "githubPullRequests.pullBranch": "never",
   "cursor.composer.usageSummaryDisplay": "always",
   "indentRainbow.indicatorStyle": "light",
-  "indentRainbow.lightIndicatorStyleLineWidth": 2
+  "indentRainbow.lightIndicatorStyleLineWidth": 2,
+  "terminal.external.linuxExec": "/usr/bin/ghostty",
+  "terminal.integrated.defaultProfile.linux": "zsh"
 }
