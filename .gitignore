@@ -18,7 +18,8 @@ Thumbs.db
 *.swn
 
 # Editor directories
-.vscode/
+*.vscode/launch.json
+*.vscode/tasks.json
 .idea/
 
 # OS files
