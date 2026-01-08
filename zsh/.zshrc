@@ -84,3 +84,8 @@ export NVM_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/nvm"
 source "$NVM_DIR/nvm.sh"
 
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+
+# Setup javm
+command -v javm &> /dev/null || curl -fsSL https://javm.dev/install.sh | bash
+command -v javm &> /dev/null && eval "$(javm init bash)"
+
