@@ -1,5 +1,4 @@
 {
-  "workbench.colorTheme": "Everforest Dark",
   "liveServer.settings.donotShowInfoMsg": true,
   "editor.accessibilitySupport": "off",
   "files.autoSave": "onFocusChange",
@@ -72,5 +71,6 @@
   "indentRainbow.indicatorStyle": "light",
   "indentRainbow.lightIndicatorStyleLineWidth": 2,
   "terminal.external.linuxExec": "/usr/bin/ghostty",
-  "terminal.integrated.defaultProfile.linux": "zsh"
+  "terminal.integrated.defaultProfile.linux": "zsh",
+  "workbench.colorTheme": "Everforest Dark"
 }
