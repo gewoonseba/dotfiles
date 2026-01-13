@@ -68,7 +68,7 @@
     "command": "composerMode.agent"
   },
   {
-    "key": "cmd+backspace",
+    "key": "ctrl+backspace",
     "command": "editor.action.deleteLines",
     "when": "textInputFocus && !editorReadonly"
   },

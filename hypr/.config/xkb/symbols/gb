@@ -1,0 +1,8 @@
+xkb_symbols "mac-hashtag-fix" {
+    // This pulls in the standard British Mac layout first
+    include "gb(mac)"
+
+    // Fix 1: Force Shift + 3 to be # (numbersign)
+    // Format is: [ Key, Shift+Key, AltGr+Key, Shift+AltGr+Key ]
+    key <AE03> { [ 3, numbersign, sterling, trademark ] };
+};

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -e
+
+# Find the dotfiles root relative to this script's location
+# Since it's in scripts/.local/bin/, root is 3 levels up
+DOTFILES_DIR=$(cd "$(dirname "$0")/../../../" && pwd)
+cd "$DOTFILES_DIR"
+
+echo "󰒓 Starting Master Omarchy Setup from $DOTFILES_DIR"
+
+# --- Run Sub-modules ---
+# We call them relative to this script's directory
+SCRIPT_DIR=$(dirname "$0")
+
+if [ -f "$SCRIPT_DIR/setup-mx-zoom" ]; then
+    bash "$SCRIPT_DIR/setup-mx-zoom"
+fi
+
+# --- Global Stow ---
+echo "󰛢 Stowing configurations..."
+STOW_FOLDERS="xremap scripts"
+
+for folder in $STOW_FOLDERS; do
+    if [ -d "$folder" ]; then
+        # We stow from the root. Stow handles the internal paths automatically.
+        stow -D "$folder" 2>/dev/null || true
+        stow "$folder"
+        echo "  󰄬 Stowed $folder"
+    fi
+done
+
+echo "󰄬 System ready. If this is a first-time setup, log out and back in."
