@@ -100,7 +100,7 @@
     "when": "terminalFocus && terminalProcessSupported || terminalFocus && terminalWebExtensionContributedProfile"
   },
   {
-    "key": "cmd+\\",
+    "key": "ctrl+\\",
     "command": "workbench.action.toggleSidebarVisibility"
   },
   {
@@ -108,7 +108,7 @@
     "command": "-workbench.action.toggleSidebarVisibility"
   },
   {
-    "key": "shift+cmd+\\",
+    "key": "ctrl+shift+\\",
     "command": "workbench.action.toggleAuxiliaryBar"
   },
   {

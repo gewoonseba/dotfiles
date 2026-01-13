@@ -25,3 +25,5 @@ Thumbs.db
 # OS files
 .Spotlight-V100
 .Trashes
+
+scripts/.local/bin/javm
