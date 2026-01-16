@@ -100,16 +100,28 @@
     "when": "terminalFocus && terminalProcessSupported || terminalFocus && terminalWebExtensionContributedProfile"
   },
   {
+    "key": "cmd+\\",
+    "command": "workbench.action.toggleSidebarVisibility",
+    "when": "isMac"
+  },
+  {
     "key": "ctrl+\\",
-    "command": "workbench.action.toggleSidebarVisibility"
+    "command": "workbench.action.toggleSidebarVisibility",
+    "when": "isLinux"
   },
   {
     "key": "ctrl+b",
     "command": "-workbench.action.toggleSidebarVisibility"
   },
   {
+    "key": "cmd+shift+\\",
+    "command": "workbench.action.toggleAuxiliaryBar",
+    "when": "isMac"
+  },
+  {
     "key": "ctrl+shift+\\",
-    "command": "workbench.action.toggleAuxiliaryBar"
+    "command": "workbench.action.toggleAuxiliaryBar",
+    "when": "isLinux"
   },
   {
     "key": "alt+ctrl+b",
