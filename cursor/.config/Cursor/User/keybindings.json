@@ -299,5 +299,14 @@
   {
     "key": "ctrl+shift+g",
     "command": "workbench.view.scm"
+  },
+  {
+    "key": "f5",
+    "command": "workbench.action.debug.selectandstart"
+  },
+  {
+    "key": "f5",
+    "command": "-workbench.action.debug.start",
+    "when": "debuggersAvailable && debugState == 'inactive'"
   }
 ]

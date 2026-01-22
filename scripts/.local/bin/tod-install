@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -e
+
+# tod-install - Install the tod CLI (unofficial Todoist command-line client)
+# https://github.com/tod-org/tod
+
+echo "󰄬 Installing tod (Todoist CLI)..."
+
+# Check if yay is available
+if ! command -v yay &> /dev/null; then
+    echo "󰅙 Error: yay is required but not installed."
+    exit 1
+fi
+
+# Check if tod is already installed
+if command -v tod &> /dev/null; then
+    CURRENT_VERSION=$(tod --version 2>/dev/null || echo "unknown")
+    echo "  tod is already installed: $CURRENT_VERSION"
+    read -p "  Reinstall/upgrade? [y/N] " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "  Skipping installation."
+        exit 0
+    fi
+fi
+
+echo "  Installing tod-bin from AUR..."
+yay -S --noconfirm tod-bin
+
+echo "󰄬 tod installed successfully"

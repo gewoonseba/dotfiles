@@ -1,0 +1,88 @@
+---
+alwaysApply: true
+---
+# Dotfiles Repository Structure and Philosophy
+
+## Overview
+This repository uses GNU Stow to manage dotfiles configuration across Linux and macOS machines. The goal is to share configuration files between systems while maintaining a clean, organized structure.
+
+## Core Philosophy
+
+### 1. Install Scripts Location
+- **All install scripts belong in `scripts/.local/bin/`**
+- These scripts handle installation, setup, and maintenance tasks for various tools
+- Scripts should be executable and follow bash best practices
+- On linux, use `yay` over `pacman` or other package managers whenever possible
+- Examples: `cursor-install-extensions`, `cursor-sync-extensions`, `gamemode-install`, `setup`
+
+### 2. Tool Folder Structure
+- **Each tool/config has its own top-level folder** (e.g., `cursor/`, `zsh/`, `starship/`, `ghostty/`, `hypr/`)
+- **Config files are placed inside tool folders as if they were in the home directory**
+- When stowed, the folder structure is preserved and symlinked to `$HOME`
+
+### 3. Stow Behavior
+- Stow creates symlinks from the repository to the home directory
+- Files in `tool-name/.config/app/config.json` become `~/.config/app/config.json`
+- Files in `tool-name/.zshrc` become `~/.zshrc`
+- The `.stow-global-ignore` file at the root controls what files stow ignores (e.g., `.DS_Store`)
+
+## Project Structure
+
+```
+dotfiles/
+├── .stow-global-ignore          # Global ignore patterns for stow
+├── cursor/                      # Cursor IDE configuration
+│   └── .config/Cursor/User/    # Cursor user settings
+├── cursor-extensions/           # Cursor extension management
+│   └── extensions.txt          # List of extensions to install
+├── cursor-macos/                # macOS-specific Cursor configs
+├── ghostty/                     # Ghostty terminal configuration
+│   └── .config/ghostty/
+├── hypr/                        # Hyprland window manager config
+│   └── .config/hypr/
+├── scripts/                     # Installation and setup scripts
+│   └── .local/bin/              # All install scripts go here
+│       ├── setup                # Master setup script
+│       ├── cursor-install-extensions
+│       ├── cursor-sync-extensions
+│       ├── cursor-update-extensions
+│       └── gamemode-install
+├── starship/                    # Starship prompt configuration
+│   └── .config/starship.toml
+└── zsh/                         # Zsh shell configuration
+    └── .zshrc
+```
+
+## Key Patterns
+
+### Adding a New Tool Configuration
+1. Create a new top-level folder: `tool-name/`
+2. Place config files inside with their full path structure (as if in `$HOME`)
+3. Example: For a tool that uses `~/.config/tool/config.json`, create `tool-name/.config/tool/config.json`
+4. Add install/setup scripts to `scripts/.local/bin/` if needed
+5. Update the `STOW_FOLDERS` variable in `scripts/.local/bin/setup` if it should be auto-stowed
+
+### Script Conventions
+- Scripts in `scripts/.local/bin/` should:
+  - Find the dotfiles root relative to their location (typically 3 levels up: `$(cd "$(dirname "$0")/../../../" && pwd)`)
+  - Use `set -e` for error handling
+  - Be executable (`chmod +x`)
+  - Follow bash best practices
+
+### Platform-Specific Configs
+- Use separate folders for platform-specific configs (e.g., `cursor-macos/` for macOS-only Cursor settings)
+- The main tool folder should contain shared/universal configurations
+
+## Stow Commands Reference
+- `stow folder-name` - Create symlinks for a folder
+- `stow -D folder-name` - Remove symlinks for a folder (destow)
+- Stow is typically run from the repository root
+- The setup script handles stowing automatically for folders listed in `STOW_FOLDERS`
+
+## Important Notes
+- Always maintain the "as if in home directory" structure within tool folders
+- Keep install scripts organized in `scripts/.local/bin/`
+- Use `.stow-global-ignore` for files that shouldn't be symlinked
+- Test stow operations before committing changes
+- Remember that stow creates symlinks, so edits in the repo affect the actual configs
+
