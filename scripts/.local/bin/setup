@@ -12,6 +12,10 @@ echo "󰒓 Starting Master Omarchy Setup from $DOTFILES_DIR"
 # We call them relative to this script's directory
 SCRIPT_DIR=$(dirname "$0")
 
+if [ -f "$SCRIPT_DIR/rsync-install" ]; then
+    bash "$SCRIPT_DIR/rsync-install"
+fi
+
 if [ -f "$SCRIPT_DIR/tod-install" ]; then
     bash "$SCRIPT_DIR/tod-install"
 fi

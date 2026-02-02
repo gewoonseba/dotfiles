@@ -1,1 +1,39 @@
+# macOS system files
 \.DS_Store
+\.AppleDouble
+\.LSOverride
+\._.*
+
+# Git directory
+\.git
+\.gitignore
+\.gitmodules
+
+# Version control
+RCS
+\.svn
+\.hg
+_darcs
+CVS
+
+# Editor files
+\.vscode
+\.idea
+.*~
+\#.*\#
+
+# Backup files
+.*\.backup
+.*\.bak
+.*\.swp
+.*\.swo
+.*\.swn
+
+# README and license files (don't stow these)
+^/README.*
+^/LICENSE.*
+^/COPYING
+
+# Stow-specific
+\.stow-local-ignore
+\.stow-global-ignore

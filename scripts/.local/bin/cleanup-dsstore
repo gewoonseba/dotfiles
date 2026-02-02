@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -e
+
+# cleanup-dsstore - Remove all .DS_Store files from the dotfiles repository
+
+# Find the dotfiles root relative to this script's location
+DOTFILES_DIR=$(cd "$(dirname "$0")/../../../" && pwd)
+
+echo "󰃨 Cleaning up .DS_Store files in dotfiles..."
+echo "  Repository: $DOTFILES_DIR"
+echo ""
+
+cd "$DOTFILES_DIR"
+
+# Count files before deletion
+COUNT=$(find . -name ".DS_Store" -type f -not -path "./.git/*" | wc -l | tr -d ' ')
+
+if [ "$COUNT" -eq 0 ]; then
+    echo "  No .DS_Store files found. Repository is clean!"
+    exit 0
+fi
+
+echo "  Found $COUNT .DS_Store file(s)"
+echo ""
+
+# Show files that will be deleted
+echo "Files to be deleted:"
+find . -name ".DS_Store" -type f -not -path "./.git/*"
+echo ""
+
+read -p "Delete these files? [y/N] " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "  Cleanup cancelled."
+    exit 0
+fi
+
+# Delete the files
+find . -name ".DS_Store" -type f -not -path "./.git/*" -delete
+
+echo ""
+echo "󰄬 Deleted $COUNT .DS_Store file(s)"
+echo ""
+echo "Note: To prevent macOS from creating .DS_Store files on network volumes:"
+echo "  defaults write com.apple.desktopservices DSDontWriteNetworkStores true"

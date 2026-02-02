@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -e
+
+# photo-dryrun - Dry run rsync backup of photos (shows what would be synced)
+# Source: /Volumes/SSD-2016/
+# Destination: /Volumes/Backup-2016/
+
+SOURCE="/Volumes/SSD-2016/"
+DEST="/Volumes/Backup-2016/"
+
+echo "󰋩 Photo Backup Dry Run"
+echo "  Source: $SOURCE"
+echo "  Destination: $DEST"
+echo ""
+
+# Check if source exists
+if [ ! -d "$SOURCE" ]; then
+    echo "󰅙 Error: Source directory not found: $SOURCE"
+    exit 1
+fi
+
+# Check if destination exists
+if [ ! -d "$DEST" ]; then
+    echo "󰅙 Error: Destination directory not found: $DEST"
+    exit 1
+fi
+
+# Check if rsync is installed
+if ! command -v rsync &> /dev/null; then
+    echo "󰅙 Error: rsync is not installed. Run: scripts/.local/bin/rsync-install"
+    exit 1
+fi
+
+echo "Running dry run (no files will be changed)..."
+echo ""
+
+# -a: archive mode (preserves permissions, timestamps, etc.)
+# -v: verbose
+# -h: human-readable sizes
+# -n: dry run (no changes)
+# --delete: delete files in dest that don't exist in source
+# --exclude='.*': exclude hidden files/folders
+rsync -avhn --delete --exclude='.*' "$SOURCE" "$DEST"
+
+echo ""
+echo "󰄬 Dry run complete. Run 'photo-backup' to perform actual sync."

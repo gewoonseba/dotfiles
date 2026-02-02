@@ -72,5 +72,6 @@
   "indentRainbow.lightIndicatorStyleLineWidth": 2,
   "terminal.external.linuxExec": "/usr/bin/ghostty",
   "terminal.integrated.defaultProfile.linux": "zsh",
-  "workbench.colorTheme": "Cursor Dark Midnight"
+  "workbench.colorTheme": "Cursor Dark Midnight",
+  "claudeCode.selectedModel": "opus"
 }

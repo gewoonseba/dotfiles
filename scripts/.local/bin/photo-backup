@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -e
+
+# photo-backup - Rsync backup of photos with progress
+# Source: /Volumes/SSD-2016/
+# Destination: /Volumes/Backup-2016/
+
+SOURCE="/Volumes/SSD-2016/"
+DEST="/Volumes/Backup-2016/"
+
+echo "󰋩 Photo Backup"
+echo "  Source: $SOURCE"
+echo "  Destination: $DEST"
+echo ""
+
+# Check if source exists
+if [ ! -d "$SOURCE" ]; then
+    echo "󰅙 Error: Source directory not found: $SOURCE"
+    exit 1
+fi
+
+# Check if destination exists
+if [ ! -d "$DEST" ]; then
+    echo "󰅙 Error: Destination directory not found: $DEST"
+    exit 1
+fi
+
+# Check if rsync is installed
+if ! command -v rsync &> /dev/null; then
+    echo "󰅙 Error: rsync is not installed. Run: scripts/.local/bin/rsync-install"
+    exit 1
+fi
+
+# Confirm before proceeding
+echo "⚠️  This will sync files and DELETE files in destination that don't exist in source."
+read -p "Continue? [y/N] " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "  Backup cancelled."
+    exit 0
+fi
+
+echo ""
+echo "Starting backup..."
+echo ""
+
+# -a: archive mode (preserves permissions, timestamps, etc.)
+# -v: verbose
+# -h: human-readable sizes
+# --delete: delete files in dest that don't exist in source
+# --exclude='.*': exclude hidden files/folders
+rsync -avh --delete --exclude='.*' "$SOURCE" "$DEST"
+
+echo ""
+echo "󰄬 Backup complete!"
