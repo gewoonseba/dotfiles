@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -e
+
+# zed-install - Install the Zed editor
+# https://zed.dev
+
+# Find the dotfiles root relative to this script's location
+DOTFILES_DIR=$(cd "$(dirname "$0")/../../../" && pwd)
+
+echo "󰄬 Installing Zed editor..."
+
+# Detect platform
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    # Linux installation via yay
+    if ! command -v yay &> /dev/null; then
+        echo "󰅙 Error: yay is required but not installed."
+        exit 1
+    fi
+
+    # Check if zed is already installed
+    if command -v zed &> /dev/null; then
+        CURRENT_VERSION=$(zed --version 2>/dev/null || echo "unknown")
+        echo "  Zed is already installed: $CURRENT_VERSION"
+        read -p "  Reinstall/upgrade? [y/N] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "  Skipping installation."
+            exit 0
+        fi
+    fi
+
+    echo "  Installing zed from AUR..."
+    yay -S --noconfirm zed
+
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS installation via Homebrew
+    if ! command -v brew &> /dev/null; then
+        echo "󰅙 Error: Homebrew is required but not installed."
+        exit 1
+    fi
+
+    # Check if zed is already installed
+    if command -v zed &> /dev/null || [ -d "/Applications/Zed.app" ]; then
+        echo "  Zed is already installed"
+        read -p "  Reinstall/upgrade? [y/N] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "  Skipping installation."
+            exit 0
+        fi
+    fi
+
+    echo "  Installing Zed via Homebrew..."
+    brew install --cask zed
+
+else
+    echo "󰅙 Error: Unsupported platform: $OSTYPE"
+    exit 1
+fi
+
+echo "󰄬 Zed installed successfully"
+
+# Stow the configuration
+echo "󰛢 Stowing Zed configuration..."
+cd "$DOTFILES_DIR"
+stow -D zed 2>/dev/null || true
+stow zed
+echo "  󰄬 Stowed zed configuration"
