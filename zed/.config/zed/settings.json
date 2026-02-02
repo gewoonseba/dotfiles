@@ -1,0 +1,89 @@
+// Zed settings
+//
+// For information on how to configure Zed, see the Zed
+// documentation: https://zed.dev/docs/configuring-zed
+//
+// To see all of Zed's default settings without changing your
+// custom settings, run `zed: open default settings` from the
+// command palette (cmd-shift-p / ctrl-shift-p)
+{
+  "project_panel": {
+    "auto_reveal_entries": true,
+  },
+  "agent_servers": {
+    "claude": {
+      "default_model": "sonnet",
+    },
+  },
+  "terminal": {
+    "font_size": 13.0,
+  },
+  "git": {
+    "inline_blame": {
+      "enabled": true,
+    },
+  },
+  "cursor_blink": true,
+  "autosave": "on_focus_change",
+  "buffer_font_fallbacks": [
+    "SF Mono",
+    "Menlo",
+    "Monaco",
+    "Courier New",
+    "monospace",
+  ],
+  "buffer_font_family": "JetBrainsMono Nerd Font",
+  "linked_edits": true,
+  "tab_size": 2,
+  "base_keymap": "VSCode",
+  "ui_font_size": 16,
+  "buffer_font_size": 14.0,
+  "theme": {
+    "mode": "system",
+    "light": "One Light",
+    "dark": "One Dark",
+  },
+  "format_on_save": "on",
+  "languages": {
+    "Python": {
+      "code_actions_on_format": {
+        "source.organizeImports.ruff": true,
+        "source.fixAll.ruff": true,
+      },
+      "language_servers": ["ruff"],
+      "formatter": [],
+    },
+    "TypeScript": {
+      "formatter": [
+        "prettier",
+        {
+          "code_action": "source.fixAll.eslint",
+        },
+      ],
+    },
+    "TSX": {
+      "formatter": [
+        "prettier",
+        {
+          "code_action": "source.fixAll.eslint",
+        },
+      ],
+    },
+    "JSON": {
+      "formatter": [
+        "prettier",
+        {
+          "code_action": "source.fixAll.eslint",
+        },
+      ],
+    },
+  },
+  "lsp": {
+    "ruff": {
+      "settings": {
+        "organizeImports": true,
+        "fixAll": true,
+      },
+    },
+  },
+}
