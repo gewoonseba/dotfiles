@@ -7,6 +7,9 @@
 // custom settings, run `zed: open default settings` from the
 // command palette (cmd-shift-p / ctrl-shift-p)
 {
+  "git_panel": {
+    "tree_view": true,
+  },
   "project_panel": {
     "auto_reveal_entries": true,
   },
@@ -17,7 +20,7 @@
   },
   "terminal": {
     "shell": {
-      "program": "zsh"
+      "program": "zsh",
     },
     "font_size": 13.0,
   },
@@ -53,7 +56,7 @@
         "source.organizeImports.ruff": true,
         "source.fixAll.ruff": true,
       },
-      "language_servers": ["ruff"],
+      "language_servers": ["ruff", "pyright"],
       "formatter": [],
     },
     "TypeScript": {
@@ -86,6 +89,13 @@
       "settings": {
         "organizeImports": true,
         "fixAll": true,
+      },
+    },
+    "pyright": {
+      "settings": {
+        "python": {
+          "pythonPath": ".venv/bin/python",
+        },
       },
     },
   },
