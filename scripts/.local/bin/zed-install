@@ -5,7 +5,9 @@ set -e
 # https://zed.dev
 
 # Find the dotfiles root relative to this script's location
-DOTFILES_DIR=$(cd "$(dirname "$0")/../../../" && pwd)
+# Resolve symlinks to get the real script path
+SCRIPT_PATH=$(readlink -f "$0")
+DOTFILES_DIR=$(cd "$(dirname "$SCRIPT_PATH")/../../../" && pwd)
 
 echo "󰄬 Installing Zed editor..."
 

@@ -16,6 +16,9 @@
     },
   },
   "terminal": {
+    "shell": {
+      "program": "zsh"
+    },
     "font_size": 13.0,
   },
   "git": {

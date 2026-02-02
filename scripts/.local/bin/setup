@@ -3,7 +3,9 @@ set -e
 
 # Find the dotfiles root relative to this script's location
 # Since it's in scripts/.local/bin/, root is 3 levels up
-DOTFILES_DIR=$(cd "$(dirname "$0")/../../../" && pwd)
+# Resolve symlinks to get the real script path
+SCRIPT_PATH=$(readlink -f "$0")
+DOTFILES_DIR=$(cd "$(dirname "$SCRIPT_PATH")/../../../" && pwd)
 cd "$DOTFILES_DIR"
 
 echo "󰒓 Starting Master Omarchy Setup from $DOTFILES_DIR"
