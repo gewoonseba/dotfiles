@@ -73,5 +73,7 @@
   "terminal.external.linuxExec": "/usr/bin/ghostty",
   "terminal.integrated.defaultProfile.linux": "zsh",
   "workbench.colorTheme": "Cursor Dark Midnight",
-  "claudeCode.selectedModel": "opus"
+  "claudeCode.selectedModel": "default",
+  "claudeCode.preferredLocation": "sidebar",
+  "claudeCode.useTerminal": true
 }
