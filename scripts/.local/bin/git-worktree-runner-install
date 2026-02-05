@@ -1,0 +1,22 @@
+#!/bin/bash
+set -e
+
+# Define the installation directory in the home folder
+INSTALL_DIR="$HOME/git-worktree-runner"
+
+if [ -d "$INSTALL_DIR" ]; then
+    echo "Installation directory $INSTALL_DIR already exists. Skipping clone."
+else
+    # Clone the repository
+    echo "Cloning git-worktree-runner to $INSTALL_DIR..."
+    git clone https://github.com/coderabbitai/git-worktree-runner.git "$INSTALL_DIR"
+fi
+
+# Navigate to the repository directory
+cd "$INSTALL_DIR"
+
+# Run the installation script
+echo "Installing git-worktree-runner..."
+./install.sh
+
+echo "Installation complete."

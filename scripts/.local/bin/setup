@@ -30,6 +30,10 @@ if [ -f "$SCRIPT_DIR/zed-install" ]; then
     bash "$SCRIPT_DIR/zed-install"
 fi
 
+if [ -f "$SCRIPT_DIR/git-worktree-runner-install" ]; then
+    bash "$SCRIPT_DIR/git-worktree-runner-install"
+fi
+
 # --- Global Stow ---
 echo "󰛢 Stowing configurations..."
 STOW_FOLDERS="xremap scripts"
