@@ -1,0 +1,48 @@
+{
+	"schemaVersion": "0.1.0",
+	"name": "YouTube",
+	"behavior": "create",
+	"noteContentFormat": "![{{schema:name}}]({{url}})",
+	"properties": [
+		{
+			"name": "title",
+			"value": "{{schema:name}}",
+			"type": "text"
+		},
+		{
+			"name": "author",
+			"value": "{{schema:author|wikilink}}",
+			"type": "multitext"
+		},
+		{
+			"name": "source",
+			"value": "{{url}}",
+			"type": "text"
+		},
+		{
+			"name": "image",
+			"value": "{{schema:thumbnailUrl|slice:0}}",
+			"type": "text"
+		},
+		{
+			"name": "created",
+			"value": "{{date}}",
+			"type": "date"
+		},
+		{
+			"name": "categories",
+			"value": "[[Videos]]",
+			"type": "text"
+		},
+		{
+			"name": "topics",
+			"value": "",
+			"type": "text"
+		}
+	],
+	"triggers": [
+		"https://www.youtube.com/watch?v="
+	],
+	"noteNameFormat": "{{schema:author}} – {{schema:name}}",
+	"path": "References"
+}
