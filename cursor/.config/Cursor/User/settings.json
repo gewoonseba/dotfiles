@@ -26,9 +26,7 @@
   "editor.codeActions.triggerOnFocusChange": true,
   "editor.fontLigatures": true,
   "terminal.integrated.fontSize": 13,
-  "workbench.preferredDarkColorTheme": "Night Owl",
   "workbench.preferredHighContrastColorTheme": "Cursor Dark High Contrast",
-  "workbench.preferredLightColorTheme": "Night Owl Light",
   "cursor.composer.shouldChimeAfterChatFinishes": true,
   "lldb.library": "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/LLDB",
   "lldb.launch.expressions": "native",
@@ -72,8 +70,14 @@
   "indentRainbow.lightIndicatorStyleLineWidth": 2,
   "terminal.external.linuxExec": "/usr/bin/ghostty",
   "terminal.integrated.defaultProfile.linux": "zsh",
-  "workbench.colorTheme": "Cursor Dark Midnight",
+  "workbench.colorTheme": "Cursor Light",
   "claudeCode.selectedModel": "default",
   "claudeCode.preferredLocation": "sidebar",
-  "claudeCode.useTerminal": true
+  "claudeCode.useTerminal": true,
+  "window.title": "${activeRepositoryBranchName}${separator}${rootName}${separator}${profileName}",
+  "workbench.settings.applyToAllProfiles": [
+    "window.title"
+  ],
+  "window.titleBarStyle": "native",
+  "window.autoDetectColorScheme": true
 }

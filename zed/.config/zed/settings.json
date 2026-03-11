@@ -15,7 +15,7 @@
   },
   "agent_servers": {
     "claude": {
-      "default_model": "sonnet",
+      "default_model": "default",
     },
   },
   "terminal": {
@@ -45,7 +45,7 @@
   "ui_font_size": 16,
   "buffer_font_size": 14.0,
   "theme": {
-    "mode": "system",
+    "mode": "dark",
     "light": "One Light",
     "dark": "One Dark",
   },
