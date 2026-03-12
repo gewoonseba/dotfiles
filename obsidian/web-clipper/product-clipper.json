@@ -38,6 +38,11 @@
 			"name": "image",
 			"value": "{{image}}",
 			"type": "text"
+		},
+		{
+			"name": "topics",
+			"value": "",
+			"type": "text"
 		}
 	],
 	"triggers": [

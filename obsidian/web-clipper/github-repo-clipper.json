@@ -1,0 +1,68 @@
+{
+  "schemaVersion": "0.1.0",
+  "name": "GitHub Repo",
+  "behavior": "create",
+  "noteNameFormat": "{{meta:property:og:title|split:\":\"|last|trim|safe_name}}",
+  "path": "References",
+  "noteContentFormat": "{{meta:property:og:description}}",
+  "properties": [
+    {
+      "name": "categories",
+      "value": "[[Repos]]",
+      "type": "multitext"
+    },
+    {
+      "name": "cover",
+      "value": "{{meta:property:og:image}}",
+      "type": "text"
+    },
+    {
+      "name": "description",
+      "value": "{{meta:property:og:description}}",
+      "type": "text"
+    },
+    {
+      "name": "author",
+      "value": "{{meta:property:og:title|split:\":\"|first|trim|wikilink}}",
+      "type": "multitext"
+    },
+    {
+      "name": "language",
+      "value": "{{selector:[data-ga-click*=\"language\"]|unique|wikilink|join}}",
+      "type": "multitext"
+    },
+    {
+      "name": "topics",
+      "value": "{{selector:.topic-tag|unique|wikilink|join}}",
+      "type": "multitext"
+    },
+    {
+      "name": "stars",
+      "value": "{{selector:#repo-stars-counter-star|trim}}",
+      "type": "number"
+    },
+    {
+      "name": "license",
+      "value": "{{selector:.octicon-law + span|trim}}",
+      "type": "text"
+    },
+    {
+      "name": "rating",
+      "value": "",
+      "type": "number"
+    },
+    {
+      "name": "url",
+      "value": "{{url}}",
+      "type": "text"
+    },
+    {
+      "name": "created",
+      "value": "{{date}}",
+      "type": "date"
+    }
+  ],
+  "triggers": [
+    "/^https:\\/\\/github\\.com\\/[^\\/]+\\/[^\\/]+\\/?$/"
+  ]
+}
