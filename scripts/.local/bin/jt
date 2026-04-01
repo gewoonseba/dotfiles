@@ -230,6 +230,103 @@ cmd_generate() {
     echo "Done."
 }
 
+cmd_mcp() {
+    local env="${1:-}"
+    local port="${2:-8002}"
+
+    if [ -z "$env" ]; then
+        echo "Select environment:"
+        echo "  1) lcl  — local dashboard-api on localhost:8000"
+        echo "  2) dev  — https://dashboard-api.dev.companion.energy"
+        echo "  3) prd  — https://dashboard-api.prd.companion.energy"
+        read -rp "Environment [2]: " choice
+        case "${choice:-2}" in
+            1|lcl) env="lcl" ;;
+            2|dev) env="dev" ;;
+            3|prd) env="prd" ;;
+            *)     echo "Invalid choice"; exit 1 ;;
+        esac
+    fi
+
+    local mcp_dir
+    mcp_dir="$(cd services/mcp-service 2>/dev/null && pwd)" || mcp_dir="$REPO/services/mcp-service"
+    local spec_file="$mcp_dir/app/openapi_spec.json"
+
+    # Generate OpenAPI spec if missing
+    if [ ! -f "$spec_file" ]; then
+        echo "OpenAPI spec not found, generating..."
+        local api_dir
+        api_dir="$(cd services/dashboard-api 2>/dev/null && pwd)" || api_dir="$REPO/services/dashboard-api"
+
+        # Source env config for DB creds (needed by dashboard-api import)
+        local env_file="$HOME/.config/jt/environments.sh"
+        if [ -f "$env_file" ]; then
+            # shellcheck source=/dev/null
+            source "$env_file"
+            env_dev  # dev creds are fine for spec generation
+        fi
+
+        (cd "$api_dir" && \
+            GOOGLE_GEOCODING_API_KEY="${GOOGLE_GEOCODING_API_KEY:-x}" \
+            WORKOS_CLIENT_ID="${WORKOS_CLIENT_ID:-x}" \
+            WORKOS_CLIENT_SECRET="${WORKOS_CLIENT_SECRET:-x}" \
+            FLUVIUS_CLIENT_SECRET="${FLUVIUS_CLIENT_SECRET:-x}" \
+            FLUVIUS_SUBSCRIPTION_KEY="${FLUVIUS_SUBSCRIPTION_KEY:-x}" \
+            DAGSTER_URL="${DAGSTER_URL:-http://x}" \
+            PYTHONPATH=. uv run python ../mcp-service/scripts/generate_openapi_spec.py)
+    fi
+
+    # Stop any existing MCP server
+    pkill -f "uvicorn app.main:app --port $port" 2>/dev/null && sleep 1 || true
+
+    # Set environment-specific config
+    local dashboard_url disable_auth
+    case "$env" in
+        lcl)
+            dashboard_url="http://localhost:8000"
+            disable_auth="true"
+            ;;
+        dev)
+            dashboard_url="https://dashboard-api.dev.companion.energy"
+            disable_auth="false"
+            ;;
+        prd)
+            dashboard_url="https://dashboard-api.prd.companion.energy"
+            disable_auth="false"
+            ;;
+    esac
+
+    # Source dashboard-api .env for WorkOS creds
+    local dashboard_env
+    dashboard_env="$(cd services/dashboard-api 2>/dev/null && pwd)/.env" || dashboard_env="$REPO/services/dashboard-api/.env"
+    if [ -f "$dashboard_env" ]; then
+        set -a
+        # shellcheck source=/dev/null
+        source "$dashboard_env"
+        set +a
+    fi
+
+    echo ""
+    echo "Starting MCP service..."
+    echo "  Environment:    $env"
+    echo "  Dashboard API:  $dashboard_url"
+    echo "  Auth:           $([ "$disable_auth" = "true" ] && echo "disabled" || echo "OAuth (WorkOS)")"
+    echo "  MCP endpoint:   http://localhost:$port/mcp/"
+    echo ""
+
+    trap 'echo ""; echo "Stopping MCP service..."; kill 0' INT TERM
+
+    (cd "$mcp_dir" && \
+        DASHBOARD_API_BASE_URL="$dashboard_url" \
+        DISABLE_AUTH="$disable_auth" \
+        MCP_BASE_URL="http://localhost:$port" \
+        COMPANION_ENV="local" \
+        LOG_LEVEL="INFO" \
+        uv run uvicorn app.main:app --port "$port") &
+
+    wait
+}
+
 cmd_stop() {
     local killed=0
 
@@ -267,7 +364,8 @@ Worktree commands:
 
 Service commands:
   jt serve [lcl|dev|prd]       Start backend + frontend (default: lcl)
-  jt stop                      Stop backend + frontend
+  jt mcp [lcl|dev|prd] [port]  Start MCP service (default: dev, port 8002)
+  jt stop                      Stop all services
 
 SDK commands:
   jt generate                   Generate the dashboard API TypeScript SDK
@@ -280,6 +378,8 @@ Examples:
   jt open feat/battery-charts
   jt edit feat/battery-charts
   jt serve prd
+  jt mcp dev
+  jt mcp prd 9000
   jt remove feat/battery-charts
 HELP
 }
@@ -294,6 +394,7 @@ case "${1:-help}" in
     list|ls) cmd_list ;;
     remove|rm) shift; cmd_remove "$1" ;;
     serve)  shift; cmd_serve "${1:-}" ;;
+    mcp)    shift; cmd_mcp "${1:-}" "${2:-8002}" ;;
     stop)   cmd_stop ;;
     generate|gen) cmd_generate ;;
     help|-h|--help) cmd_help ;;

@@ -2,9 +2,35 @@
   "permissions": {
     "allow": [
       "mcp__pencil",
-      "Skill(conversation-search)"
+      "Skill(conversation-search)",
+      "Bash(git:*)",
+      "Bash(npm:*)",
+      "Bash(gh:*)",
+      "Bash(npx:*)",
+      "Bash(ls:*)",
+      "Bash(cd:*)",
+      "Bash(mkdir:*)",
+      "Bash(python3:*)",
+      "Bash(node:*)",
+      "Bash(which:*)",
+      "Bash(wc:*)",
+      "Bash(lsof:*)",
+      "Bash(env:*)",
+      "Bash(curl:*)",
+      "Bash(source:*)",
+      "Bash(cc-conversation-search:*)",
+      "Bash(uv:*)",
+      "Bash(open:*)",
+      "Bash(rm:*)",
+      "Bash(chmod +x:*)",
+      "Bash(jt:*)",
+      "mcp__plugin_figma_figma__generate_figma_design",
+      "mcp__plugin_figma_figma__use_figma",
+      "mcp__plugin_figma_figma__whoami",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__query-docs"
     ],
-    "defaultMode": "default"
+    "defaultMode": "auto"
   },
   "hooks": {
     "UserPromptSubmit": [
@@ -87,5 +113,6 @@
       }
     }
   },
-  "effortLevel": "high"
+  "effortLevel": "high",
+  "skipAutoPermissionPrompt": true
 }
