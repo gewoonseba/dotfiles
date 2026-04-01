@@ -7,6 +7,11 @@
 // custom settings, run `zed: open default settings` from the
 // command palette (cmd-shift-p / ctrl-shift-p)
 {
+  "agent": {
+    "favorite_models": [],
+    "notify_when_agent_waiting": "never",
+    "model_parameters": []
+  },
   "git_panel": {
     "tree_view": true,
   },
@@ -41,13 +46,13 @@
   "buffer_font_family": "JetBrainsMono Nerd Font",
   "linked_edits": true,
   "tab_size": 2,
-  "base_keymap": "VSCode",
+  "base_keymap": "Cursor",
   "ui_font_size": 16,
   "buffer_font_size": 14.0,
   "theme": {
-    "mode": "dark",
+    "mode": "system",
     "light": "One Light",
-    "dark": "One Dark",
+    "dark": "One Dark"
   },
   "format_on_save": "on",
   "languages": {

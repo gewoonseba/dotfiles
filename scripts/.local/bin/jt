@@ -1,0 +1,264 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# jt — Jolteon worktree & service manager
+# See: jt help
+
+REPO="/Users/sebastianstoelen/Work/jolteon"
+WORKSPACE="/Users/sebastianstoelen/Work/workspaces/jolteon"
+
+# ─── Helpers ───────────────────────────────────────────────
+
+setup_worktree() {
+    local target_dir="$1"
+
+    echo "Copying environment files..."
+    (cd "$REPO" && find . -name '.env' -not -path './node_modules/*' -not -path './.venv/*' -not -path './.git/*') | while read -r envfile; do
+        if [ -f "$REPO/$envfile" ]; then
+            mkdir -p "$target_dir/$(dirname "$envfile")"
+            cp "$REPO/$envfile" "$target_dir/$envfile"
+        fi
+    done
+
+    if [ -f "$REPO/CLAUDE.md" ]; then
+        cp "$REPO/CLAUDE.md" "$target_dir/CLAUDE.md"
+        echo "  copied CLAUDE.md"
+    fi
+
+    for dir in .claude .cursor .vscode; do
+        if [ -d "$REPO/$dir" ] && [ ! -d "$target_dir/$dir" ]; then
+            cp -r "$REPO/$dir" "$target_dir/$dir"
+            echo "  copied $dir/"
+        fi
+    done
+
+    echo "Installing Python dependencies..."
+    (cd "$target_dir" && uv sync --quiet)
+
+    echo "Installing frontend dependencies..."
+    (cd "$target_dir/services/frontend" && npm i --silent 2>/dev/null)
+}
+
+# ─── Commands ──────────────────────────────────────────────
+
+cmd_new() {
+    local branch="$1"
+    local worktree_dir="$WORKSPACE/$branch"
+
+    if [ -d "$worktree_dir" ]; then
+        echo "Error: directory already exists: $worktree_dir"
+        echo "Use 'jt open $branch' to cd into it, or 'jt edit $branch' to open in Zed."
+        exit 1
+    fi
+
+    echo "Creating worktree: $branch"
+    git -C "$REPO" fetch origin main --quiet
+    mkdir -p "$(dirname "$worktree_dir")"
+    git -C "$REPO" worktree add -b "$branch" "$worktree_dir" origin/main
+
+    setup_worktree "$worktree_dir"
+
+    echo ""
+    echo "Done. Worktree ready at:"
+    echo "  $worktree_dir"
+    echo ""
+    echo "To start working:"
+    echo "  cd $worktree_dir"
+    echo "  jt serve"
+}
+
+cmd_open() {
+    local branch="$1"
+    local worktree_dir="$WORKSPACE/$branch"
+
+    if [ ! -d "$worktree_dir" ]; then
+        echo "Error: no worktree at $worktree_dir"
+        echo "Use 'jt list' to see available worktrees, or 'jt new $branch' to create one."
+        exit 1
+    fi
+
+    cd "$worktree_dir"
+    exec "$SHELL"
+}
+
+cmd_list() {
+    printf "%-40s %s\n" "BRANCH" "PATH"
+    printf '─%.0s' $(seq 1 80)
+    echo
+    git -C "$REPO" worktree list --porcelain 2>/dev/null \
+    | awk '/^worktree / { dir=$2 } /^branch / {
+        branch=$2; sub("refs/heads/", "", branch);
+        printf "%-40s %s\n", branch, dir
+    }'
+}
+
+cmd_remove() {
+    local branch="$1"
+    local worktree_dir="$WORKSPACE/$branch"
+
+    if [ ! -d "$worktree_dir" ]; then
+        echo "No worktree at $worktree_dir"
+        exit 1
+    fi
+
+    read -rp "Remove worktree at $worktree_dir? [y/N] " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        git -C "$REPO" worktree remove "$worktree_dir"
+        git -C "$REPO" branch -d "$branch" 2>/dev/null && echo "Deleted branch: $branch" || true
+        echo "Removed worktree: $worktree_dir"
+    fi
+}
+
+cmd_setup() {
+    local dir="${1:-$(pwd)}"
+
+    if [ ! -d "$dir" ]; then
+        # Try as a branch name
+        if [ -d "$WORKSPACE/$dir" ]; then
+            dir="$WORKSPACE/$dir"
+        else
+            echo "Error: no directory at $dir"
+            exit 1
+        fi
+    fi
+
+    setup_worktree "$dir"
+    echo ""
+    echo "Done. Worktree ready at:"
+    echo "  $dir"
+}
+
+cmd_edit() {
+    local branch="${1:-}"
+    local dir
+
+    if [ -z "$branch" ]; then
+        dir="$(pwd)"
+    else
+        dir="$WORKSPACE/$branch"
+    fi
+
+    if [ ! -d "$dir" ]; then
+        echo "Error: no directory at $dir"
+        exit 1
+    fi
+
+    zed "$dir"
+}
+
+cmd_serve() {
+    local env="${1:-lcl}"
+
+    # Stop any running services first
+    cmd_stop 2>/dev/null || true
+
+    local env_file="$HOME/.config/jt/environments.sh"
+    if [ ! -f "$env_file" ]; then
+        echo "Error: missing $env_file"
+        echo ""
+        echo "Create it with env_lcl(), env_dev(), env_prd() shell functions."
+        echo "See: jt help serve"
+        exit 1
+    fi
+    # shellcheck source=/dev/null
+    source "$env_file"
+
+    case "$env" in
+        lcl) env_lcl ;;
+        dev) env_dev ;;
+        prd) env_prd ;;
+        *)
+            echo "Unknown environment: $env"
+            echo "Valid options: lcl, dev, prd"
+            exit 1
+            ;;
+    esac
+
+    echo ""
+    echo "Starting services..."
+    echo "  Backend:  http://localhost:8000"
+    echo "  Frontend: http://localhost:5173"
+    echo ""
+
+    trap 'echo ""; echo "Stopping services..."; kill 0' INT TERM
+
+    (cd services/dashboard-api 2>/dev/null || cd "$REPO/services/dashboard-api"
+     uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload) &
+
+    local vite_env=""
+    if [ "${DISABLE_AUTH_RAW:-}" = "true" ]; then
+        vite_env="VITE_DISABLE_AUTH=true"
+    fi
+    (cd services/frontend 2>/dev/null || cd "$REPO/services/frontend"
+     env $vite_env npm run dev) &
+
+    echo "Services started. Press Ctrl+C to stop."
+    echo ""
+    wait
+}
+
+cmd_stop() {
+    local killed=0
+
+    if pkill -f 'uvicorn app.main:app' 2>/dev/null; then
+        echo "Stopped backend (uvicorn)"
+        killed=1
+    fi
+
+    if pkill -f 'vite.*services/frontend' 2>/dev/null; then
+        echo "Stopped frontend (vite)"
+        killed=1
+    fi
+
+    pkill -f 'npm run dev' 2>/dev/null || true
+
+    if [ "$killed" -eq 0 ]; then
+        echo "No services running."
+    fi
+}
+
+cmd_help() {
+    cat <<'HELP'
+jt — Jolteon worktree & service manager
+
+Usage:
+  jt <command> [arguments]
+
+Worktree commands:
+  jt new <branch>              Create a new worktree and branch
+  jt setup [branch|path]       Copy env files + install deps (default: cwd)
+  jt open <branch>             Open a shell in an existing worktree
+  jt edit [branch]             Open worktree in Zed (default: current dir)
+  jt list                      List all worktrees
+  jt remove <branch>           Remove a worktree and its branch
+
+Service commands:
+  jt serve [lcl|dev|prd]       Start backend + frontend (default: lcl)
+  jt stop                      Stop backend + frontend
+
+Other:
+  jt help                      Show this help
+
+Examples:
+  jt new feat/battery-charts
+  jt open feat/battery-charts
+  jt edit feat/battery-charts
+  jt serve prd
+  jt remove feat/battery-charts
+HELP
+}
+
+# ─── Main ──────────────────────────────────────────────────
+
+case "${1:-help}" in
+    new)    shift; cmd_new "$1" ;;
+    setup)  shift; cmd_setup "${1:-}" ;;
+    open)   shift; cmd_open "$1" ;;
+    edit)   shift; cmd_edit "${1:-}" ;;
+    list|ls) cmd_list ;;
+    remove|rm) shift; cmd_remove "$1" ;;
+    serve)  shift; cmd_serve "${1:-lcl}" ;;
+    stop)   cmd_stop ;;
+    help|-h|--help) cmd_help ;;
+    *)      echo "Unknown command: $1"; echo "Run 'jt help' for usage."; exit 1 ;;
+esac

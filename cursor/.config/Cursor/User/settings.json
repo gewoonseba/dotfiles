@@ -79,5 +79,6 @@
     "window.title"
   ],
   "window.titleBarStyle": "native",
-  "window.autoDetectColorScheme": true
+  "window.autoDetectColorScheme": true,
+  "git.detectWorktrees": false
 }
