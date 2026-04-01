@@ -25,10 +25,11 @@ setup_worktree() {
         echo "  copied CLAUDE.md"
     fi
 
-    for dir in .claude .cursor .vscode; do
-        if [ -d "$REPO/$dir" ] && [ ! -d "$target_dir/$dir" ]; then
-            cp -r "$REPO/$dir" "$target_dir/$dir"
-            echo "  copied $dir/"
+    local d
+    for d in .claude .cursor .vscode; do
+        if [ -d "$REPO/$d" ] && [ ! -d "$target_dir/$d" ]; then
+            cp -r "$REPO/$d" "$target_dir/$d"
+            echo "  copied $d/"
         fi
     done
 
@@ -147,7 +148,21 @@ cmd_edit() {
 }
 
 cmd_serve() {
-    local env="${1:-lcl}"
+    local env="${1:-}"
+
+    if [ -z "$env" ]; then
+        echo "Select environment:"
+        echo "  1) lcl"
+        echo "  2) dev"
+        echo "  3) prd"
+        read -rp "Environment [1]: " choice
+        case "${choice:-1}" in
+            1|lcl) env="lcl" ;;
+            2|dev) env="dev" ;;
+            3|prd) env="prd" ;;
+            *)     echo "Invalid choice"; exit 1 ;;
+        esac
+    fi
 
     # Stop any running services first
     cmd_stop 2>/dev/null || true
@@ -257,7 +272,7 @@ case "${1:-help}" in
     edit)   shift; cmd_edit "${1:-}" ;;
     list|ls) cmd_list ;;
     remove|rm) shift; cmd_remove "$1" ;;
-    serve)  shift; cmd_serve "${1:-lcl}" ;;
+    serve)  shift; cmd_serve "${1:-}" ;;
     stop)   cmd_stop ;;
     help|-h|--help) cmd_help ;;
     *)      echo "Unknown command: $1"; echo "Run 'jt help' for usage."; exit 1 ;;
