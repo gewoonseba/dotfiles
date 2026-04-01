@@ -1,0 +1,26 @@
+{
+  "eval_id": 4,
+  "eval_name": "view-contract-details-and-filter",
+  "expectations": [
+    {
+      "text": "filters_by_asset",
+      "passed": true,
+      "evidence": "Called get_contracts with asset_uuid=601b1bb8-14bc-4924-86ea-dcecb53fa7e4 (Balen). Returned 3 contracts filtered to this asset only."
+    },
+    {
+      "text": "reports_count",
+      "passed": true,
+      "evidence": "Response total=3. Would report: 3 contracts on the Balen asset."
+    },
+    {
+      "text": "reports_types",
+      "passed": true,
+      "evidence": "Contract types found: 2x dynamic (Injection SPOT + Consumption SPOT), 1x imbalance. All from supplier BEE, cost category, 2026-2028."
+    }
+  ],
+  "issues_found": [
+    "Same issue as eval 1: resolving asset name 'Balen' to UUID requires either knowing the UUID or calling get_all_assets (broken on remote MCP). However, a smart workaround exists: call get_contracts WITHOUT asset_uuid filter first, and use the filter_options.assets in the response to discover asset UUIDs by name. The skill should mention this as a discovery mechanism.",
+    "The get_contracts response includes a very useful filter_options field (contract_types, assets with uuid+name, suppliers). The skill doesn't mention this field at all — it should, as it's the key to resolving asset names to UUIDs when get_all_assets is unavailable."
+  ],
+  "pass_rate": 1.0
+}

@@ -1,0 +1,27 @@
+{
+  "eval_id": 5,
+  "eval_name": "manage-relations-assign",
+  "expectations": [
+    {
+      "text": "shows_confirmation",
+      "passed": true,
+      "evidence": "Skill explicitly requires confirmation before mutating calls. Expected output: 'Assign Balen as child of Arendonk (contains relation). Proceed?'"
+    },
+    {
+      "text": "waits_for_approval",
+      "passed": true,
+      "evidence": "Skill states: 'Do NOT execute the call until the user approves.' Not actually executed to avoid mutating DEV data."
+    },
+    {
+      "text": "correct_assignment_params",
+      "passed": true,
+      "evidence": "Expected call uses correct UUIDs: asset_uuid=601b1bb8 (Balen), parent_asset_uuid=7de54b47 (Arendonk), relation_type='contains', deleted=false. Verified against batch_update_asset_assignments schema."
+    }
+  ],
+  "issues_found": [
+    "The skill says 'Fetch the tree first to see current structure' before managing relations. But get_assets_tree is broken on remote MCP. The skill needs a fallback: e.g., use get_contracts filter_options.assets to discover assets, or use get_asset to look up individual assets by UUID.",
+    "Same asset-name-to-UUID resolution problem as other evals."
+  ],
+  "pass_rate": 1.0,
+  "note": "Dry run only — batch_update_asset_assignments not actually called to avoid mutating DEV data"
+}

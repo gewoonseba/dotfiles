@@ -1,0 +1,11 @@
+{
+  "eval_id": 1,
+  "eval_name": "customer-search-and-contracts",
+  "prompt": "Can you show me the contracts for Elicio? I'm interested in what's on the Arendonk asset.",
+  "assertions": [
+    {"name": "searches_for_customer_by_name", "type": "tool_called"},
+    {"name": "fetches_contracts", "type": "tool_called"},
+    {"name": "displays_readable_table", "type": "output_format"},
+    {"name": "identifies_arendonk_contracts", "type": "content_accuracy"}
+  ]
+}

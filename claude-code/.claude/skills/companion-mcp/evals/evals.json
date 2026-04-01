@@ -1,0 +1,196 @@
+{
+  "skill_name": "companion-mcp",
+  "environment": "DEV",
+  "environment_mcp_prefix": "mcp__claude_ai_Companion_energy_DEV__",
+  "notes": "These evals test the companion-mcp skill against the Companion.energy DEV environment. The MCP tool prefix varies by environment (e.g., mcp__companion-prd__ for local PRD, mcp__claude_ai_Companion_energy_DEV__ for remote DEV). When running evals, the skill must adapt tool names to match the connected MCP. Known issue: remote MCPs have a serialization bug where endpoints returning raw arrays (get_all_assets, get_assets_tree, get_all_locations, etc.) fail — only paginated/single-object endpoints work reliably.",
+  "test_customer": {
+    "name": "Elicio",
+    "id": "90ecb210-dd6b-4cfb-aac7-83e175388115",
+    "description": "Wind energy company with 98 assets (mostly wind turbines in energy groups) and 54 contracts (dynamic + imbalance types). Good test customer because it has a rich data set."
+  },
+  "known_assets": {
+    "Arendonk": {
+      "uuid": "7de54b47-09c8-4cd6-8f6e-a444d7b4706d",
+      "type": "energy group",
+      "location_uuid": "93db530f-2eff-4950-afda-df998e937fea"
+    },
+    "Balen": {
+      "uuid": "601b1bb8-14bc-4924-86ea-dcecb53fa7e4",
+      "type": "energy group",
+      "location_uuid": "4c2c7a1d-2ca9-4b53-a9f7-7b9550a84c30"
+    }
+  },
+  "evals": [
+    {
+      "id": 1,
+      "name": "customer-search-and-contracts",
+      "prompt": "Can you show me the contracts for Elicio? I'm interested in what's on the Arendonk asset.",
+      "expected_output": "Claude should: (1) search for 'Elicio' customer, (2) select the customer, (3) fetch contracts filtered by the Arendonk asset, (4) display them in a readable table with name, type, category, supplier, dates.",
+      "assertions": [
+        {
+          "name": "searches_for_customer_by_name",
+          "type": "tool_called",
+          "description": "Uses get_customers with search parameter to find Elicio instead of listing all customers",
+          "check": "get_customers called with search='Elicio' or similar"
+        },
+        {
+          "name": "fetches_contracts",
+          "type": "tool_called",
+          "description": "Calls get_contracts with the correct customer_id",
+          "check": "get_contracts called with customer_id=90ecb210-dd6b-4cfb-aac7-83e175388115"
+        },
+        {
+          "name": "displays_readable_table",
+          "type": "output_format",
+          "description": "Presents contracts in a human-readable format (table or structured list), not raw JSON",
+          "check": "Output contains a formatted table or list, not a JSON dump"
+        },
+        {
+          "name": "identifies_arendonk_contracts",
+          "type": "content_accuracy",
+          "description": "Correctly identifies/filters the contracts belonging to the Arendonk asset",
+          "check": "Output shows the Consumption SPOT Contract and Injection SPOT Contract for Arendonk"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "asset-detail-inspection",
+      "prompt": "I'd like to see the full details of the Arendonk asset for Elicio - config, integrations, steering, everything.",
+      "expected_output": "Claude should: (1) find Elicio customer, (2) find the Arendonk asset, (3) fetch asset details, config, integrations, and steering config in parallel, (4) present a comprehensive summary.",
+      "assertions": [
+        {
+          "name": "fetches_asset_details",
+          "type": "tool_called",
+          "description": "Calls get_asset with the Arendonk asset UUID",
+          "check": "get_asset called with asset_id=7de54b47-09c8-4cd6-8f6e-a444d7b4706d"
+        },
+        {
+          "name": "fetches_config",
+          "type": "tool_called",
+          "description": "Calls get_asset_config for the asset",
+          "check": "get_asset_config called with same asset_id"
+        },
+        {
+          "name": "fetches_integrations",
+          "type": "tool_called",
+          "description": "Calls get_asset_integrations for the asset",
+          "check": "get_asset_integrations called with same asset_id"
+        },
+        {
+          "name": "fetches_steering",
+          "type": "tool_called",
+          "description": "Calls get_asset_steering_config for the asset",
+          "check": "get_asset_steering_config called with same asset_id"
+        },
+        {
+          "name": "parallel_fetches",
+          "type": "efficiency",
+          "description": "Fetches config, integrations, and steering in parallel (same turn) rather than sequentially",
+          "check": "get_asset_config, get_asset_integrations, get_asset_steering_config called in the same message"
+        },
+        {
+          "name": "presents_comprehensive_summary",
+          "type": "output_format",
+          "description": "Presents all fetched information in a structured, readable summary",
+          "check": "Output includes asset name, type, timezone, config details, integration status, and steering status"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "create-battery-asset",
+      "prompt": "I need to create a new battery asset for Elicio. Call it 'BESS Test Gent', 100kWh capacity, 92% efficiency, 50kW charge and discharge rate. Use the Arendonk location. Add an API integration with 15-minute granularity, realtime frequency. Enable steering with min SoC 0.1 and max SoC 0.9, self-consumption off.",
+      "expected_output": "Claude should: (1) find Elicio, (2) show a human-readable summary of all the details, (3) wait for user confirmation before creating, (4) call create_asset with all the correct parameters.",
+      "assertions": [
+        {
+          "name": "shows_confirmation_summary",
+          "type": "output_format",
+          "description": "Shows a human-readable summary of what will be created BEFORE calling create_asset",
+          "check": "Output includes a summary with asset name, type, capacity, efficiency, charge/discharge rates, integration type, steering config — shown before the create call"
+        },
+        {
+          "name": "waits_for_approval",
+          "type": "behavior",
+          "description": "Does NOT call create_asset until user confirms",
+          "check": "create_asset is NOT called in the first response — Claude asks for confirmation first"
+        },
+        {
+          "name": "correct_asset_config",
+          "type": "parameter_accuracy",
+          "description": "create_asset called with correct battery config parameters",
+          "check": "asset_config includes type='battery', capacity_kwh=100, efficiency=0.92, max_charge_rate_kw=50, max_discharge_rate_kw=50"
+        },
+        {
+          "name": "correct_steering_config",
+          "type": "parameter_accuracy",
+          "description": "Steering config has correct SoC values",
+          "check": "steering_config includes active=true, config.type='battery', config.min_soc=0.1, config.max_soc=0.9, config.self_consumption=false"
+        },
+        {
+          "name": "correct_integration",
+          "type": "parameter_accuracy",
+          "description": "API integration configured correctly",
+          "check": "integrations array includes object with type='api', granularity='15T', integration_frequency='realtime'"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "view-contract-details-and-filter",
+      "prompt": "Show me all the contracts on Elicio's Balen asset. What's the total number and what types are they?",
+      "expected_output": "Claude should: (1) find Elicio, (2) fetch contracts filtered by Balen asset UUID, (3) present a summary with count and type breakdown.",
+      "assertions": [
+        {
+          "name": "filters_by_asset",
+          "type": "tool_called",
+          "description": "Uses asset_uuid filter when fetching contracts",
+          "check": "get_contracts called with asset_uuid=601b1bb8-14bc-4924-86ea-dcecb53fa7e4"
+        },
+        {
+          "name": "reports_count",
+          "type": "content_accuracy",
+          "description": "Reports the total number of contracts for the asset",
+          "check": "Output mentions the correct number of contracts"
+        },
+        {
+          "name": "reports_types",
+          "type": "content_accuracy",
+          "description": "Identifies the contract types present",
+          "check": "Output mentions the contract types (dynamic, imbalance, etc.)"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "manage-relations-assign",
+      "prompt": "I want to assign the Balen asset as a child of Arendonk for Elicio, using a 'contains' relation.",
+      "expected_output": "Claude should: (1) find Elicio, (2) identify both assets, (3) show a summary of the proposed change, (4) wait for confirmation, (5) call batch_update_asset_assignments with correct parameters.",
+      "assertions": [
+        {
+          "name": "shows_confirmation",
+          "type": "behavior",
+          "description": "Shows the proposed assignment and waits for user confirmation before executing",
+          "check": "Output describes the assignment (Balen -> Arendonk, contains) and asks for confirmation"
+        },
+        {
+          "name": "waits_for_approval",
+          "type": "behavior",
+          "description": "Does NOT call batch_update_asset_assignments until user confirms",
+          "check": "batch_update_asset_assignments is NOT called in the first response"
+        },
+        {
+          "name": "correct_assignment_params",
+          "type": "parameter_accuracy",
+          "description": "Uses correct UUIDs and relation type in the assignment",
+          "check": "assignments array includes asset_uuid=601b1bb8 (Balen), parent_asset_uuid=7de54b47 (Arendonk), relation_type='contains', deleted=false"
+        }
+      ],
+      "files": []
+    }
+  ]
+}

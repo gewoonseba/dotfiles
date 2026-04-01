@@ -1,0 +1,51 @@
+{
+  "skill_name": "frontend-review",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Hey, can you review this page component I wrote for our savings reporting feature? I want to make sure it follows our codebase conventions. Here's the file:\n\n[contents of eval1-savings-page.tsx]",
+      "expected_output": "Review should flag: unnecessary useMemo/useCallback (React 19 compiler handles this), custom SavingsMetricCard using inline styles instead of existing Metric/Card components, custom CustomBadge duplicating components/ui/badge.tsx, custom CustomTooltip duplicating components/ui/tooltip/, local helper components defined BEFORE the main export, and inline style objects instead of Tailwind classes.",
+      "files": ["evals/files/eval1-savings-page.tsx"],
+      "expectations": [
+        "Flags useMemo as unnecessary given React 19 with React Compiler",
+        "Flags useCallback as unnecessary given React 19 with React Compiler",
+        "Identifies CustomBadge as duplicating the existing badge.tsx component in components/ui/",
+        "Identifies CustomTooltip as duplicating the existing tooltip component in components/ui/tooltip/",
+        "Identifies SavingsMetricCard using inline styles instead of Tailwind classes",
+        "Flags that local components (SavingsHeader, SavingsMetricCard, etc.) are defined before the main exported component instead of after it",
+        "Suggests using existing Metric or Card components for the metric cards",
+        "Review follows the Summary / Issues / Suggestions / Good patterns structure"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I just wrote this AssetDetailCard component. It's in components/ at the top level. Can you take a look and tell me if anything is off?\n\n[contents of eval2-asset-detail-card.tsx]",
+      "expected_output": "Review should flag: wrong directory placement (feature-specific component in shared components/ instead of features/assets/components/), use of `any` types for unit objects, custom LoadingSkeleton when Skeleton component exists in components/ui/skeleton/, inline SVG ChevronIcon instead of using lucide-react icons, and custom table markup instead of using the Table component from components/ui/table/. Should praise: local components placed at end of file, good use of existing Card components.",
+      "files": ["evals/files/eval2-asset-detail-card.tsx"],
+      "expectations": [
+        "Flags that the component is in components/ but should be in features/assets/components/ since it's asset-specific",
+        "Identifies the use of `any` type annotations and suggests proper typing",
+        "Notes the custom LoadingSkeleton could use the existing Skeleton component from components/ui/skeleton/",
+        "Notes the custom table markup could use the Table component from components/ui/table/",
+        "Acknowledges good patterns like local components being placed at the end of the file",
+        "Review follows the Summary / Issues / Suggestions / Good patterns structure"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Can you review this nomination table component? It's a core piece of our nomination feature. I'm especially curious if there are any structural or performance things I should worry about.\n\n[contents of eval3-nomination-feature.tsx]",
+      "expected_output": "Review should flag: heavy frontend computation (hourly aggregates should be backend), custom SelectDropdown duplicating components/ui/select.tsx, custom NumberInput duplicating components/ui/inputs, custom ActionButton duplicating components/ui/button/, excessive useMemo/useCallback/memo usage, inline styles on summary stats cards, and local components (SelectDropdown, NumberInput, ActionButton) defined before the main export.",
+      "files": ["evals/files/eval3-nomination-feature.tsx"],
+      "expectations": [
+        "Flags the hourlyAggregates computation as something that should happen on the backend, not the frontend",
+        "Flags excessive useMemo/useCallback usage as unnecessary with React Compiler",
+        "Identifies React.memo on NominationRow as likely unnecessary with React Compiler",
+        "Identifies SelectDropdown as duplicating the existing Select component in components/ui/",
+        "Identifies ActionButton as duplicating the existing Button component in components/ui/button/",
+        "Identifies inline style objects on the summary stat cards instead of Tailwind classes",
+        "Flags that local components (SelectDropdown, NumberInput, ActionButton) are defined before the main exported component",
+        "Review follows the Summary / Issues / Suggestions / Good patterns structure"
+      ]
+    }
+  ]
+}

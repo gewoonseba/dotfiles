@@ -1,0 +1,14 @@
+{
+  "tool": "batch_update_asset_assignments",
+  "params": {
+    "customer_id": "90ecb210-dd6b-4cfb-aac7-83e175388115",
+    "assignments": [
+      {
+        "asset_uuid": "601b1bb8-14bc-4924-86ea-dcecb53fa7e4",
+        "parent_asset_uuid": "7de54b47-09c8-4cd6-8f6e-a444d7b4706d",
+        "relation_type": "contains",
+        "deleted": false
+      }
+    ]
+  }
+}

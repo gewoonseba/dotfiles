@@ -1,0 +1,32 @@
+{
+  "tool": "create_asset",
+  "params": {
+    "customer_id": "90ecb210-dd6b-4cfb-aac7-83e175388115",
+    "name": "BESS Test Gent",
+    "asset_type": "battery",
+    "location_uuid": "93db530f-2eff-4950-afda-df998e937fea",
+    "asset_config": {
+      "type": "battery",
+      "capacity_kwh": 100,
+      "efficiency": 0.92,
+      "max_charge_rate_kw": 50,
+      "max_discharge_rate_kw": 50
+    },
+    "steering_config": {
+      "active": true,
+      "config": {
+        "type": "battery",
+        "min_soc": 0.1,
+        "max_soc": 0.9,
+        "self_consumption": false
+      }
+    },
+    "integrations": [
+      {
+        "type": "api",
+        "granularity": "15T",
+        "integration_frequency": "realtime"
+      }
+    ]
+  }
+}

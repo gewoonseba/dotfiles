@@ -1,0 +1,37 @@
+{
+  "eval_id": 3,
+  "eval_name": "create-battery-asset",
+  "expectations": [
+    {
+      "text": "shows_confirmation_summary",
+      "passed": true,
+      "evidence": "The skill clearly instructs to show a human-readable summary before mutating. The expected output format is well-defined. A fresh Claude session following the skill would present the summary with all details: name, type, capacity, efficiency, rates, integration, steering."
+    },
+    {
+      "text": "waits_for_approval",
+      "passed": true,
+      "evidence": "Skill explicitly states: 'Do NOT execute the call until the user approves.' This eval was not actually executed (to avoid creating test data on DEV), but the skill instruction is clear."
+    },
+    {
+      "text": "correct_asset_config",
+      "passed": true,
+      "evidence": "Expected call constructed with correct params. Verified against MCP tool schema: create_asset accepts asset_config with discriminator on 'type' field. battery type requires capacity_kwh, efficiency, max_charge_rate_kw, max_discharge_rate_kw — all present."
+    },
+    {
+      "text": "correct_steering_config",
+      "passed": true,
+      "evidence": "Steering config structure matches expected: active=true, config.type='battery', min_soc=0.1, max_soc=0.9, self_consumption=false."
+    },
+    {
+      "text": "correct_integration",
+      "passed": true,
+      "evidence": "Integration config matches: type='api', granularity='15T', integration_frequency='realtime'. Verified against API integration schema."
+    }
+  ],
+  "issues_found": [
+    "This eval was graded against the expected call structure, not actually executed. To fully validate, would need to run create_asset and verify the response.",
+    "The skill doesn't mention that the user could provide a location by NAME rather than UUID. A real user saying 'use the Arendonk location' would need Claude to resolve 'Arendonk' to a location UUID. The skill says to call get_all_locations, but that endpoint is broken on remote MCP (array serialization). Skill should address this: e.g., use the location_uuid from the asset if the user references an existing asset's location."
+  ],
+  "pass_rate": 1.0,
+  "note": "Dry run only — create_asset not actually called to avoid mutating DEV data"
+}

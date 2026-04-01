@@ -1,0 +1,42 @@
+{
+  "eval_id": 2,
+  "eval_name": "asset-detail-inspection",
+  "expectations": [
+    {
+      "text": "fetches_asset_details",
+      "passed": true,
+      "evidence": "Called get_asset with correct asset_id and customer_id. Returned: name=Arendonk, type=energy group, timezone=Europe/Brussels."
+    },
+    {
+      "text": "fetches_config",
+      "passed": true,
+      "evidence": "Called get_asset_config. Returned: type=energy group, is_nominated=true."
+    },
+    {
+      "text": "fetches_integrations",
+      "passed": false,
+      "evidence": "Called get_asset_integrations but got no output. Remote MCP serialization issue with array responses (even empty arrays). The asset likely has no integrations, but the empty-array-as-no-output is confusing."
+    },
+    {
+      "text": "fetches_steering",
+      "passed": false,
+      "evidence": "Called get_asset_steering_config but got error: 'Unexpected return type from tool: NoneType'. The asset has no steering config (returns null), but remote MCP can't serialize null responses."
+    },
+    {
+      "text": "parallel_fetches",
+      "passed": true,
+      "evidence": "All 4 calls were made in the same message (parallel)."
+    },
+    {
+      "text": "presents_comprehensive_summary",
+      "passed": true,
+      "evidence": "Despite the integration/steering errors, the available data (asset details + config) was retrieved and can be presented clearly."
+    }
+  ],
+  "issues_found": [
+    "Remote MCP cannot serialize null responses (get_asset_steering_config returns NoneType error when asset has no steering config).",
+    "Remote MCP cannot serialize empty array responses (get_asset_integrations returns no output for assets with no integrations).",
+    "The skill should instruct Claude to handle these gracefully: null/error from steering means 'no steering configured', empty/no-output from integrations means 'no integrations linked'."
+  ],
+  "pass_rate": 0.67
+}
