@@ -1,0 +1,10 @@
+{
+  "eval_id": 10,
+  "eval_name": "discover-asset-by-name-fallback",
+  "prompt": "Can you find the Balen asset for Elicio and tell me its UUID and type?",
+  "assertions": [
+    "Attempts asset discovery via get_all_assets or get_contracts filter_options",
+    "Reports correct UUID 601b1bb8-14bc-4924-86ea-dcecb53fa7e4 and type 'energy group'",
+    "If get_all_assets fails, tries alternative approach rather than giving up"
+  ]
+}

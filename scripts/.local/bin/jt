@@ -9,6 +9,27 @@ WORKSPACE="/Users/sebastianstoelen/Work/workspaces/jolteon"
 
 # ─── Helpers ───────────────────────────────────────────────
 
+require_jolteon_context() {
+    local cwd
+    cwd="$(pwd)"
+
+    # Check against all registered worktrees (includes the main repo)
+    local worktree_path
+    while IFS= read -r worktree_path; do
+        if [[ "$cwd" == "$worktree_path"* ]]; then
+            return 0
+        fi
+    done < <(git -C "$REPO" worktree list --porcelain 2>/dev/null | awk '/^worktree / { print $2 }')
+
+    echo "Error: not in a Jolteon repo or worktree."
+    echo ""
+    echo "Run this command from a worktree (see 'jt list') or the main repo:"
+    echo "  $REPO"
+    echo ""
+    echo "Use 'jt new <branch>' to create a new worktree."
+    exit 1
+}
+
 setup_worktree() {
     local target_dir="$1"
 
@@ -148,6 +169,7 @@ cmd_edit() {
 }
 
 cmd_serve() {
+    require_jolteon_context
     local env="${1:-}"
 
     if [ -z "$env" ]; then
@@ -213,6 +235,18 @@ cmd_serve() {
 }
 
 cmd_generate() {
+    require_jolteon_context
+
+    local javm_bin
+    javm_bin="$(command -v javm 2>/dev/null || echo "$HOME/.local/bin/javm")"
+    if [ ! -x "$javm_bin" ]; then
+        echo "Error: javm is not installed."
+        echo ""
+        echo "javm is required to manage Java versions for the OpenAPI generator."
+        echo "Install it first, then re-run 'jt generate'."
+        exit 1
+    fi
+
     if ! curl -sf http://localhost:8000/docs >/dev/null 2>&1; then
         echo "Dashboard API is not running on localhost:8000."
         read -rp "Start it with 'jt serve'? [Y/n] " confirm
@@ -224,13 +258,30 @@ cmd_generate() {
         # serve blocks (wait), so we won't reach here
     fi
 
+    local sdk_dir
+    sdk_dir="$(cd packages/dashboard-api-ts-sdk 2>/dev/null && pwd)" || sdk_dir="$REPO/packages/dashboard-api-ts-sdk"
+
+    # javm modifies JAVA_HOME/PATH via a shell function (fd3 protocol) that is
+    # only available in interactive zsh. Replicate the protocol directly so the
+    # env vars are exported for npm run build.
+    local fd3
+    fd3=$(mktemp)
+    "$javm_bin" --fd3 "$fd3" use 25
+    if [ -s "$fd3" ]; then
+        while IFS=$'\t' read -r op key val; do
+            [ "$op" = "SET" ] && export "$key=$val"
+            [ "$op" = "UNSET" ] && unset "$key"
+        done < "$fd3"
+    fi
+    rm -f "$fd3"
+
     echo "Generating SDK..."
-    (cd packages/dashboard-api-ts-sdk 2>/dev/null || cd "$REPO/packages/dashboard-api-ts-sdk"
-     javm use 25 && npm run build)
+    (cd "$sdk_dir" && npm run build)
     echo "Done."
 }
 
 cmd_mcp() {
+    require_jolteon_context
     local env="${1:-}"
     local port="${2:-8002}"
 

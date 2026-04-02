@@ -2,10 +2,12 @@
 name: browser
 description: >
   Browse the web, interact with web pages, fill forms, click buttons, take screenshots, and extract
-  information from websites. Use this skill whenever the user asks to open a URL, navigate a website,
-  scrape content, fill out a form, test a web page, take a screenshot, or perform any browser-based
-  task. Also trigger when the user says "go to", "open this page", "check this site", "screenshot",
-  "fill this form", "click on", or references interacting with a live web page.
+  information from websites. Supports browser profiles (root, partner, customer) for different user
+  contexts — specify as argument e.g. "/browser customer". Use this skill whenever the user asks to
+  open a URL, navigate a website, scrape content, fill out a form, test a web page, take a screenshot,
+  or perform any browser-based task. Also trigger when the user says "go to", "open this page",
+  "check this site", "screenshot", "fill this form", "click on", or references interacting with a
+  live web page.
 ---
 
 # Browser Automation via agent-browser
@@ -15,16 +17,34 @@ You have access to the `agent-browser` CLI tool for all browser automation. Use 
 
 ---
 
+## Browser Profiles
+
+Three browser profiles are available, each pre-authenticated as a different user type:
+
+| Profile      | `--profile` path                                              | Description                           |
+|-------------|---------------------------------------------------------------|---------------------------------------|
+| **root**     | `/Users/sebastianstoelen/Work/browser-profiles/root`         | Global admin (ROOT organization)      |
+| **partner**  | `/Users/sebastianstoelen/Work/browser-profiles/partner`      | Reseller / partner organization       |
+| **customer** | `/Users/sebastianstoelen/Work/browser-profiles/customer`     | End-customer organization             |
+
+### Choosing a profile
+
+- If the user specifies a profile (e.g., `/browser root`, "open as customer", "use the partner profile"), use that profile.
+- If the user does not specify a profile, **default to `root`**.
+- If the task requires testing multiple user perspectives, use separate sessions with different profiles.
+
+---
+
 ## Core Workflow
 
 For any browser task, follow this pattern:
 
 ### 1. Open and wait for the page
 
-Always use `--profile` to reuse the authenticated browser session:
+Always use `--profile` to reuse the authenticated browser session (replace `<profile>` with the chosen profile path):
 
 ```bash
-agent-browser --profile /Users/sebastianstoelen/Work/.browser-profile open <url> && agent-browser wait --load networkidle
+agent-browser --profile /Users/sebastianstoelen/Work/browser-profiles/root open <url> && agent-browser wait --load networkidle
 ```
 
 ### 2. Understand the page
@@ -129,7 +149,7 @@ agent-browser wait --load networkidle      # Wait for network to settle
 ### Navigation
 
 ```bash
-agent-browser --profile /Users/sebastianstoelen/Work/.browser-profile open <url>  # Navigate to URL (with persistent session)
+agent-browser --profile /Users/sebastianstoelen/Work/browser-profiles/root open <url>  # Navigate to URL (with persistent session)
 agent-browser back                                    # Go back
 agent-browser forward                                 # Go forward
 agent-browser reload                                  # Reload page
@@ -176,11 +196,13 @@ agent-browser network requests --filter "api"  # Filter by pattern
 
 ### Authentication persistence
 
-All commands already use `--profile /Users/sebastianstoelen/Work/.browser-profile`, which persists cookies, localStorage, and all browser state across sessions. Login once and all future runs are authenticated.
+Each profile directory persists cookies, localStorage, and all browser state across sessions. Login once per profile and all future runs with that profile are authenticated.
 
 To re-login if a session expires:
 ```bash
-agent-browser --profile /Users/sebastianstoelen/Work/.browser-profile --headed open <login-url>
+agent-browser --profile /Users/sebastianstoelen/Work/browser-profiles/root --headed open <login-url>
+agent-browser --profile /Users/sebastianstoelen/Work/browser-profiles/partner --headed open <login-url>
+agent-browser --profile /Users/sebastianstoelen/Work/browser-profiles/customer --headed open <login-url>
 ```
 
 ---

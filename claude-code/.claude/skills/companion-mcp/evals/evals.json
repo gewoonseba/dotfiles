@@ -191,6 +191,237 @@
         }
       ],
       "files": []
+    },
+    {
+      "id": 6,
+      "name": "create-hedge-contract",
+      "prompt": "Create a new hedge contract on Elicio's Arendonk asset. Name it 'Q3 2026 Base Hedge', supplier Luminus, from 2026-07-01 to 2026-09-30, cost category, price 48.50 EUR/MWh, amount 500 kW, sensor direction 'in'.",
+      "expected_output": "Claude should: (1) find Elicio, (2) resolve Arendonk asset UUID (via contracts filter_options or get_all_assets), (3) show a confirmation summary with all contract details in human-readable form, (4) wait for approval before calling create_contract, (5) call create_contract with correct parameters including the nested parameters object.",
+      "assertions": [
+        {
+          "name": "resolves_customer",
+          "type": "tool_called",
+          "description": "Finds Elicio customer via get_customers search",
+          "check": "get_customers called with search='Elicio'"
+        },
+        {
+          "name": "resolves_asset_uuid",
+          "type": "tool_called",
+          "description": "Resolves the Arendonk asset UUID — either via get_all_assets, get_contracts filter_options, or already known",
+          "check": "Arendonk UUID 7de54b47-09c8-4cd6-8f6e-a444d7b4706d is used in the create_contract call"
+        },
+        {
+          "name": "shows_confirmation_before_create",
+          "type": "behavior",
+          "description": "Shows a human-readable summary and waits for user confirmation before calling create_contract",
+          "check": "create_contract is NOT called in the first response — user sees summary with contract name, type, supplier, dates, price, amount first"
+        },
+        {
+          "name": "correct_contract_type_and_params",
+          "type": "parameter_accuracy",
+          "description": "create_contract called with type='hedge' and correct nested parameters",
+          "check": "type='hedge', parameters.type='hedge', parameters.price=48.5, parameters.amount=500, parameters.unit='kW', parameters.sensor_direction='in'"
+        },
+        {
+          "name": "correct_contract_metadata",
+          "type": "parameter_accuracy",
+          "description": "Contract metadata (name, supplier, dates, category) is correct",
+          "check": "name='Q3 2026 Base Hedge', supplier='Luminus', start_date='2026-07-01', end_date='2026-09-30', category='cost'"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 7,
+      "name": "edit-contract-update-price",
+      "prompt": "I need to update one of the dynamic contracts on Elicio's Arendonk asset — change the scaling factor to 1.05 and the constant to 2.50. Can you find it and update it?",
+      "expected_output": "Claude should: (1) find Elicio, (2) fetch contracts filtered by Arendonk, (3) identify the dynamic contract(s), (4) fetch the full contract details with get_contract, (5) show current values vs proposed changes, (6) wait for confirmation, (7) call update_contract with ALL fields (full replacement) including the updated scaling and constant.",
+      "assertions": [
+        {
+          "name": "fetches_contracts_for_asset",
+          "type": "tool_called",
+          "description": "Gets contracts filtered to Arendonk asset to find the dynamic contract",
+          "check": "get_contracts called with customer_id and asset_uuid for Arendonk"
+        },
+        {
+          "name": "fetches_full_contract_before_edit",
+          "type": "tool_called",
+          "description": "Calls get_contract to fetch the full contract details before editing (needed for full-replacement update)",
+          "check": "get_contract called with the specific contract_id"
+        },
+        {
+          "name": "shows_diff_and_confirms",
+          "type": "behavior",
+          "description": "Shows current vs new values and waits for confirmation before calling update_contract",
+          "check": "Output shows old scaling/constant alongside new values (1.05/2.50), and update_contract is NOT called until user confirms"
+        },
+        {
+          "name": "full_replacement_update",
+          "type": "parameter_accuracy",
+          "description": "update_contract includes ALL required fields (not just the changed ones), since it's a full replacement",
+          "check": "update_contract called with name, asset_uuid, supplier, start_date, end_date, category, type, and full parameters object — not just scaling and constant"
+        },
+        {
+          "name": "correct_updated_values",
+          "type": "parameter_accuracy",
+          "description": "The updated parameters have the new scaling and constant values",
+          "check": "parameters.scaling=1.05, parameters.constant=2.5"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 8,
+      "name": "edit-asset-rename-and-config",
+      "prompt": "Rename Elicio's Balen asset to 'Balen Wind Park' and set is_nominated to true in its config.",
+      "expected_output": "Claude should: (1) find Elicio, (2) resolve Balen asset UUID, (3) fetch current asset details + config (to pre-fill), (4) show a summary of proposed changes, (5) wait for confirmation, (6) call update_asset with the correct parameters.",
+      "assertions": [
+        {
+          "name": "fetches_current_state",
+          "type": "tool_called",
+          "description": "Fetches the current asset details and config before editing",
+          "check": "get_asset and get_asset_config called for Balen UUID 601b1bb8-14bc-4924-86ea-dcecb53fa7e4"
+        },
+        {
+          "name": "shows_confirmation",
+          "type": "behavior",
+          "description": "Shows the proposed changes and waits for user approval",
+          "check": "Output shows rename from 'Balen' to 'Balen Wind Park' and is_nominated change, asks for confirmation before calling update_asset"
+        },
+        {
+          "name": "correct_name_update",
+          "type": "parameter_accuracy",
+          "description": "update_asset called with the new name",
+          "check": "update_asset called with name='Balen Wind Park'"
+        },
+        {
+          "name": "correct_config_update",
+          "type": "parameter_accuracy",
+          "description": "update_asset called with asset_config including is_nominated=true and the correct type discriminator",
+          "check": "asset_config includes type='energy group' and is_nominated=true"
+        },
+        {
+          "name": "does_not_clobber_integrations",
+          "type": "behavior",
+          "description": "Does NOT pass an empty integrations array (which would unlink all integrations) — either omits it or preserves existing",
+          "check": "update_asset either omits integrations field or includes the current integrations unchanged"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 9,
+      "name": "view-asset-sensor-data",
+      "prompt": "Show me the sensor data for Elicio's Arendonk asset for March 2026.",
+      "expected_output": "Claude should: (1) find Elicio, (2) resolve Arendonk asset UUID, (3) call get_asset_data with correct date range (2026-03-01 to 2026-03-31), (4) display a sensor summary table (not thousands of raw data points).",
+      "assertions": [
+        {
+          "name": "calls_get_asset_data",
+          "type": "tool_called",
+          "description": "Calls get_asset_data with the correct asset_id, customer_id, and date range",
+          "check": "get_asset_data called with asset_id=7de54b47, start_datetime=2026-03-01T00:00:00, end_datetime=2026-03-31T23:59:59 (or similar)"
+        },
+        {
+          "name": "summarizes_sensors",
+          "type": "output_format",
+          "description": "Presents a summary table of sensors (type, unit, direction, granularity, data point count) rather than dumping raw data points",
+          "check": "Output contains a structured sensor summary, not individual timestamped values"
+        },
+        {
+          "name": "mentions_steering_status",
+          "type": "content_accuracy",
+          "description": "Reports whether steering data is present and the last signal datetime",
+          "check": "Output mentions steering status (active/inactive or last signal time)"
+        },
+        {
+          "name": "mentions_access_power",
+          "type": "content_accuracy",
+          "description": "Reports access power value if available",
+          "check": "Output mentions access power (value in kW) or states it's not available"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 10,
+      "name": "discover-asset-by-name-fallback",
+      "prompt": "Can you find the Balen asset for Elicio and tell me its UUID and type?",
+      "expected_output": "Claude should resolve the Balen asset by name to its UUID. If get_all_assets fails (remote MCP array serialization issue), it should fall back to using get_contracts filter_options or another strategy to discover the asset.",
+      "assertions": [
+        {
+          "name": "attempts_asset_discovery",
+          "type": "tool_called",
+          "description": "Attempts to find the asset — either via get_all_assets directly or via the fallback strategy",
+          "check": "Calls get_all_assets OR get_contracts (to use filter_options.assets) to find the Balen asset"
+        },
+        {
+          "name": "correctly_identifies_asset",
+          "type": "content_accuracy",
+          "description": "Reports the correct UUID and type for Balen",
+          "check": "Output includes UUID 601b1bb8-14bc-4924-86ea-dcecb53fa7e4 and type 'energy group'"
+        },
+        {
+          "name": "handles_failure_gracefully",
+          "type": "behavior",
+          "description": "If get_all_assets fails, does not give up — tries an alternative approach",
+          "check": "If get_all_assets errors, Claude tries get_contracts or another endpoint rather than telling the user it can't find the asset"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 11,
+      "name": "view-location-details",
+      "prompt": "Where is Elicio's Arendonk asset located? Show me the full location details.",
+      "expected_output": "Claude should: (1) find Elicio, (2) resolve Arendonk asset (get the location_uuid), (3) call get_location with the location UUID, (4) display location details (name, country, zip code, coordinates, timezone).",
+      "assertions": [
+        {
+          "name": "fetches_asset_for_location_uuid",
+          "type": "tool_called",
+          "description": "Fetches the asset details to get its location_uuid",
+          "check": "get_asset called for Arendonk, or location_uuid 93db530f-2eff-4950-afda-df998e937fea is already known"
+        },
+        {
+          "name": "calls_get_location",
+          "type": "tool_called",
+          "description": "Calls get_location with the correct location UUID",
+          "check": "get_location called with location_id=93db530f-2eff-4950-afda-df998e937fea"
+        },
+        {
+          "name": "displays_location_info",
+          "type": "output_format",
+          "description": "Presents location details in a readable format",
+          "check": "Output includes location name, country, zip code, and timezone. Coordinates shown if available."
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 12,
+      "name": "integration-alert-health-check",
+      "prompt": "Are there any integration issues for Elicio? Show me any stale or erroring integrations.",
+      "expected_output": "Claude should: (1) find Elicio, (2) call get_customer_integration_alert_issues with the customer_id, (3) present a summary of active issues grouped by type/severity.",
+      "assertions": [
+        {
+          "name": "calls_integration_alerts",
+          "type": "tool_called",
+          "description": "Calls get_customer_integration_alert_issues with the correct customer_id",
+          "check": "get_customer_integration_alert_issues called with customer_id=90ecb210-dd6b-4cfb-aac7-83e175388115"
+        },
+        {
+          "name": "presents_readable_summary",
+          "type": "output_format",
+          "description": "Shows issues in a structured readable format, not raw JSON",
+          "check": "Output is a table or structured list showing issue type, affected asset/integration, and status"
+        },
+        {
+          "name": "distinguishes_issue_types",
+          "type": "content_accuracy",
+          "description": "Differentiates between stale, error, and never_seen issue types if multiple are present",
+          "check": "Output groups or labels issues by their type (stale/error/never_seen)"
+        }
+      ],
+      "files": []
     }
   ]
 }

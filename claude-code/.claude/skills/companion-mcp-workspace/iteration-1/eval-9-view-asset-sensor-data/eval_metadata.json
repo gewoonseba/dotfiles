@@ -1,0 +1,11 @@
+{
+  "eval_id": 9,
+  "eval_name": "view-asset-sensor-data",
+  "prompt": "Show me the sensor data for Elicio's Arendonk asset for March 2026.",
+  "assertions": [
+    "get_asset_data called with asset_id=7de54b47, start_datetime around 2026-03-01, end_datetime around 2026-03-31",
+    "Output contains a sensor summary table (type, unit, direction, granularity, data point count), not raw data points",
+    "Steering status is reported (active/inactive or last signal time)",
+    "Access power value is reported if available"
+  ]
+}

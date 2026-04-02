@@ -1,0 +1,10 @@
+{
+  "eval_id": 12,
+  "eval_name": "integration-alert-health-check",
+  "prompt": "Are there any integration issues for Elicio? Show me any stale or erroring integrations.",
+  "assertions": [
+    "get_customer_integration_alert_issues called with customer_id=90ecb210-dd6b-4cfb-aac7-83e175388115",
+    "Output is a structured readable format (table or list), not raw JSON",
+    "Issues are grouped or labeled by type (stale/error/never_seen) if multiple types present"
+  ]
+}

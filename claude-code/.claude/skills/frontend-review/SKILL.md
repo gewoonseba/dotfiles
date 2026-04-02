@@ -307,6 +307,14 @@ that duplicates what the shared formatters provide.
 
 **What to flag:**
 
+- **Hardcoded currency symbols or codes** — strings like `"€"`, `"£"`, `"CHF"`, `"EUR"`, `"GBP"`,
+  or template literals embedding them (e.g., `` `€${value}` ``, `` `${value} EUR` ``). Use
+  `getCurrencySymbol(currency)` for symbols, or `formatFullCost` / `formatSimplifiedCost` /
+  `formatSimplifiedCostOrDash` from `lib/money.ts` for formatted values with units.
+- **Hardcoded power/energy unit strings** — strings like `"kW"`, `"kWh"`, `"MW"`, `"MWh"`, `"GW"`,
+  `"GWh"`, or template literals embedding them (e.g., `` `${value} kWh` ``, `` `${value} MW` ``).
+  Use `formatPower(value, 'power')` for power, `formatPower(value, 'usage')` for energy, or
+  `formatPowerOrDash(...)` when the value may be null/undefined.
 - Inline `new Intl.NumberFormat(...)` for power, currency, or percentage values — use the shared
   formatter from `lib/utils.ts` or `lib/money.ts`
 - Manual `toFixed()` + string concatenation for units like `${value.toFixed(2)} kW` — use
@@ -318,6 +326,9 @@ that duplicates what the shared formatters provide.
 
 *"This introduces custom formatting for [power/currency/date/percentage] values. The codebase has
 `[formatter name]` in `[file]` that handles this — use it instead for consistency."*
+
+*"This hardcodes a [currency symbol / power unit]. Use `[formatter name]` from `[file]` instead —
+it handles unit scaling and locale formatting automatically."*
 
 ### Import hygiene
 - Imports should be at the top of the file
