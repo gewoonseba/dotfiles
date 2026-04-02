@@ -209,13 +209,17 @@ agent-browser --profile /Users/sebastianstoelen/Work/browser-profiles/customer -
 
 ## Guidelines
 
-1. **Always snapshot before interacting** — don't guess selectors. Use `snapshot -i` to get the
+1. **Always run headless** — Never pass `--headed` unless the user explicitly asks for a visible
+   browser window (e.g., "open headed", "show the browser", "I want to watch"). The only exception
+   is re-login flows where the user needs to interact with the browser manually.
+
+2. **Always snapshot before interacting** — don't guess selectors. Use `snapshot -i` to get the
    current interactive elements and their `@ref` identifiers.
 
-2. **Wait for page loads** — After navigation or clicks that trigger page loads, use
+3. **Wait for page loads** — After navigation or clicks that trigger page loads, use
    `agent-browser wait --load networkidle` before taking the next snapshot.
 
-3. **Chain commands** — Use `&&` to chain related commands in a single Bash call:
+4. **Chain commands** — Use `&&` to chain related commands in a single Bash call:
    ```bash
    agent-browser fill @e1 "test@example.com" && agent-browser fill @e2 "password" && agent-browser click @e3
    ```
@@ -223,14 +227,14 @@ agent-browser --profile /Users/sebastianstoelen/Work/browser-profiles/customer -
 4. **Use compact snapshots for large pages** — Add `-c` flag and scope with `-s` selector to
    avoid overwhelming output.
 
-5. **Show screenshots to the user** — When taking screenshots for verification, use the Read tool
+6. **Show screenshots to the user** — When taking screenshots for verification, use the Read tool
    on the resulting image path so the user can see it.
 
-6. **Don't trigger alerts/dialogs** — Avoid clicking elements that trigger `alert()`, `confirm()`,
+7. **Don't trigger alerts/dialogs** — Avoid clicking elements that trigger `alert()`, `confirm()`,
    or `prompt()` dialogs as these block the browser. If needed, dismiss them with:
    ```bash
    agent-browser eval "window.alert = () => {}; window.confirm = () => true; window.prompt = () => ''"
    ```
 
-7. **Close the browser when done** — Run `agent-browser close` when the browsing session is
+8. **Close the browser when done** — Run `agent-browser close` when the browsing session is
    complete, unless the user wants to continue interacting.

@@ -72,6 +72,16 @@
             "statusMessage": "Linting frontend..."
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.local/bin/claude-hook-lint-backend.sh",
+            "statusMessage": "Linting backend..."
+          }
+        ]
       }
     ],
     "PostToolUseFailure": [
