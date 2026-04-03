@@ -4,8 +4,8 @@ set -euo pipefail
 # jt — Jolteon worktree & service manager
 # See: jt help
 
-REPO="/Users/sebastianstoelen/Work/jolteon"
-WORKSPACE="/Users/sebastianstoelen/Work/workspaces/jolteon"
+REPO="$HOME/Work/jolteon"
+WORKSPACE="$HOME/Work/workspaces/jolteon"
 
 # ─── Helpers ───────────────────────────────────────────────
 
@@ -20,7 +20,7 @@ setup_worktree() {
     local target_dir="$1"
 
     echo "Copying environment files..."
-    (cd "$REPO" && find . -name '.env' -not -path './node_modules/*' -not -path './.venv/*' -not -path './.git/*') | while read -r envfile; do
+    (cd "$REPO" && find . \( -name node_modules -o -name .venv -o -name .git -o -name .data \) -prune -o -name '.env' -print) | while read -r envfile; do
         if [ -f "$REPO/$envfile" ]; then
             mkdir -p "$target_dir/$(dirname "$envfile")"
             cp "$REPO/$envfile" "$target_dir/$envfile"
@@ -63,6 +63,41 @@ cmd_new() {
     git -C "$REPO" fetch origin main --quiet
     mkdir -p "$(dirname "$worktree_dir")"
     git -C "$REPO" worktree add -b "$branch" "$worktree_dir" origin/main
+
+    setup_worktree "$worktree_dir"
+
+    echo ""
+    echo "Done. Worktree ready at:"
+    echo "  $worktree_dir"
+    echo ""
+    echo "To start working:"
+    echo "  cd $worktree_dir"
+    echo "  jt serve"
+}
+
+cmd_checkout() {
+    local branch="$1"
+    local worktree_dir="$WORKSPACE/$branch"
+
+    if [ -d "$worktree_dir" ]; then
+        echo "Error: directory already exists: $worktree_dir"
+        echo "Use 'jt open $branch' to cd into it, or 'jt edit $branch' to open in Zed."
+        exit 1
+    fi
+
+    echo "Fetching remote branch: $branch"
+    git -C "$REPO" fetch origin "$branch" --quiet
+
+    if ! git -C "$REPO" rev-parse "origin/$branch" >/dev/null 2>&1; then
+        echo "Error: remote branch 'origin/$branch' not found."
+        echo "Use 'jt new $branch' to create a new branch instead."
+        exit 1
+    fi
+
+    echo "Creating worktree: $branch"
+    mkdir -p "$(dirname "$worktree_dir")"
+    git -C "$REPO" worktree add "$worktree_dir" "origin/$branch"
+    git -C "$worktree_dir" checkout -b "$branch" 2>/dev/null || true
 
     setup_worktree "$worktree_dir"
 
@@ -151,7 +186,9 @@ cmd_edit() {
         exit 1
     fi
 
-    zed "$dir"
+    local zed_cmd
+    zed_cmd="$(command -v zed 2>/dev/null || command -v zeditor 2>/dev/null)" || { echo "Error: zed/zeditor not found"; exit 1; }
+    "$zed_cmd" "$dir"
 }
 
 cmd_serve() {
@@ -393,6 +430,7 @@ Usage:
 
 Worktree commands:
   jt new <branch>              Create a new worktree and branch
+  jt checkout <branch>         Create a worktree from an existing remote branch
   jt setup [branch|path]       Copy env files + install deps (default: cwd)
   jt open <branch>             Open a shell in an existing worktree
   jt edit [branch]             Open worktree in Zed (default: current dir)
@@ -412,6 +450,7 @@ Other:
 
 Examples:
   jt new feat/battery-charts
+  jt checkout feat/partner-portal-v1
   jt open feat/battery-charts
   jt edit feat/battery-charts
   jt serve prd
@@ -425,6 +464,7 @@ HELP
 
 case "${1:-help}" in
     new)    shift; cmd_new "$1" ;;
+    checkout|co) shift; cmd_checkout "$1" ;;
     setup)  shift; cmd_setup "${1:-}" ;;
     open)   shift; cmd_open "$1" ;;
     edit)   shift; cmd_edit "${1:-}" ;;
