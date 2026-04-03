@@ -1,0 +1,12 @@
+{
+  "eval_id": 8,
+  "eval_name": "edit-asset-rename-and-config",
+  "prompt": "Rename Elicio's Balen asset to 'Balen Wind Park' and set is_nominated to true in its config.",
+  "assertions": [
+    "get_asset and get_asset_config called for Balen UUID 601b1bb8 before editing",
+    "Proposed changes shown and user confirmation requested before update_asset",
+    "update_asset called with name='Balen Wind Park'",
+    "asset_config includes type='energy group' and is_nominated=true",
+    "Integrations are NOT clobbered (either omitted or preserved in update_asset call)"
+  ]
+}

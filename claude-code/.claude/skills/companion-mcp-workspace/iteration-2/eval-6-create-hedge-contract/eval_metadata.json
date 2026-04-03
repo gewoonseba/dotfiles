@@ -1,0 +1,13 @@
+{
+  "eval_id": 6,
+  "eval_name": "create-hedge-contract",
+  "prompt": "Create a new hedge contract on Elicio's Arendonk asset. Name it 'Q3 2026 Base Hedge', supplier Luminus, from 2026-07-01 to 2026-09-30, cost category, price 48.50 EUR/MWh, amount 500 kW, sensor direction 'in'.",
+  "assertions": [
+    "get_customers called with search parameter to find Elicio",
+    "Arendonk asset UUID 7de54b47-09c8-4cd6-8f6e-a444d7b4706d is resolved and used",
+    "A human-readable confirmation summary is shown BEFORE create_contract is called",
+    "create_contract is NOT called until user confirms — Claude stops and asks for approval",
+    "create_contract parameters include type='hedge', parameters.price=48.5, parameters.amount=500, parameters.unit='kW', parameters.sensor_direction='in'",
+    "Contract metadata is correct: name='Q3 2026 Base Hedge', supplier='Luminus', start_date='2026-07-01', end_date='2026-09-30', category='cost'"
+  ]
+}

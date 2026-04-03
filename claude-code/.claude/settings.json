@@ -28,9 +28,14 @@
       "mcp__plugin_figma_figma__use_figma",
       "mcp__plugin_figma_figma__whoami",
       "mcp__context7__resolve-library-id",
-      "mcp__context7__query-docs"
+      "mcp__context7__query-docs",
+      "Bash(brew --prefix gh)",
+      "Bash(export PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\")",
+      "Bash(export PATH=\"/opt/homebrew/bin:$PATH\")",
+      "Read(//Users/sebastianstoelen/Work/notes/Notes/**)",
+      "Bash(echo \"EXIT:$?\")"
     ],
-    "defaultMode": "auto"
+    "defaultMode": "default"
   },
   "hooks": {
     "UserPromptSubmit": [

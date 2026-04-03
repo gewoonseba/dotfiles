@@ -9,26 +9,12 @@ WORKSPACE="/Users/sebastianstoelen/Work/workspaces/jolteon"
 
 # ─── Helpers ───────────────────────────────────────────────
 
-require_jolteon_context() {
-    local cwd
-    cwd="$(pwd)"
-
-    # Check against all registered worktrees (includes the main repo)
-    local worktree_path
-    while IFS= read -r worktree_path; do
-        if [[ "$cwd" == "$worktree_path"* ]]; then
-            return 0
-        fi
-    done < <(git -C "$REPO" worktree list --porcelain 2>/dev/null | awk '/^worktree / { print $2 }')
-
-    echo "Error: not in a Jolteon repo or worktree."
+hint_worktree() {
     echo ""
-    echo "Run this command from a worktree (see 'jt list') or the main repo:"
-    echo "  $REPO"
-    echo ""
-    echo "Use 'jt new <branch>' to create a new worktree."
-    exit 1
+    echo "Hint: make sure you're in a Jolteon worktree (see 'jt list')."
 }
+
+trap 'hint_worktree' ERR
 
 setup_worktree() {
     local target_dir="$1"
@@ -169,7 +155,7 @@ cmd_edit() {
 }
 
 cmd_serve() {
-    require_jolteon_context
+
     local env="${1:-}"
 
     if [ -z "$env" ]; then
@@ -235,7 +221,7 @@ cmd_serve() {
 }
 
 cmd_generate() {
-    require_jolteon_context
+
 
     local javm_bin
     javm_bin="$(command -v javm 2>/dev/null || echo "$HOME/.local/bin/javm")"
@@ -281,7 +267,7 @@ cmd_generate() {
 }
 
 cmd_mcp() {
-    require_jolteon_context
+
     local env="${1:-}"
     local port="${2:-8002}"
 

@@ -1,0 +1,13 @@
+{
+  "eval_id": 7,
+  "eval_name": "edit-contract-update-price",
+  "prompt": "I need to update one of the dynamic contracts on Elicio's Arendonk asset — change the scaling factor to 1.05 and the constant to 2.50. Can you find it and update it?",
+  "assertions": [
+    "get_contracts called filtered to Arendonk asset to find the dynamic contract",
+    "get_contract called with specific contract_id to fetch full details before editing",
+    "Current vs new values shown to user before calling update_contract",
+    "update_contract is NOT called until user confirms",
+    "update_contract includes ALL required fields (full replacement), not just scaling and constant",
+    "Updated parameters have scaling=1.05 and constant=2.5"
+  ]
+}

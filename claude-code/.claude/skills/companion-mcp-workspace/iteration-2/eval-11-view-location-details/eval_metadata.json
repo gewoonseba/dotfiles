@@ -1,0 +1,10 @@
+{
+  "eval_id": 11,
+  "eval_name": "view-location-details",
+  "prompt": "Where is Elicio's Arendonk asset located? Show me the full location details.",
+  "assertions": [
+    "get_asset called for Arendonk to get location_uuid",
+    "get_location called with location_id=93db530f-2eff-4950-afda-df998e937fea",
+    "Output includes location name, country, zip code, and timezone"
+  ]
+}
