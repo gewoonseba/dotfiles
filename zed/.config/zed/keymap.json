@@ -1,21 +1,78 @@
-// Zed keymap
-//
-// For information on binding keys, see the Zed
-// documentation: https://zed.dev/docs/key-bindings
-//
-// To see the default key bindings run `zed: open default keymap`
-// from the command palette.
 [
   {
     "context": "Workspace",
     "bindings": {
-      // "shift shift": "file_finder::Toggle"
-    },
+      "cmd-\\": "workspace::ToggleLeftDock"
+    }
   },
   {
-    "context": "Editor && vim_mode == insert",
-    "bindings": {
-      // "j k": "vim::NormalBefore"
-    },
+    "context": "Workspace",
+    "unbind": {
+      "cmd-b": "workspace::ToggleLeftDock"
+    }
   },
+  {
+    "context": "Workspace",
+    "bindings": {
+      "cmd-|": "workspace::ToggleRightDock"
+    }
+  },
+  {
+    "context": "Workspace",
+    "unbind": {
+      "cmd-r": "workspace::ToggleRightDock"
+    }
+  },
+  {
+    "context": "Editor",
+    "unbind": {
+      "cmd-|": "editor::MoveToEnclosingBracket"
+    }
+  },
+  {
+    "context": "Editor",
+    "unbind": {
+      "cmd-\\": "pane::SplitRight"
+    }
+  },
+  {
+    "context": "Editor && mode == full",
+    "unbind": {
+      "cmd-k": "assistant::InlineAssist"
+    }
+  },
+  {
+    "context": "Terminal",
+    "unbind": {
+      "cmd-k": "assistant::InlineAssist"
+    }
+  },
+  {
+    "context": "Pane",
+    "bindings": {
+      "alt-cmd-k": [
+        "pane::CloseOtherItems",
+        {
+          "close_pinned": false
+        }
+      ]
+    }
+  },
+  {
+    "context": "Pane",
+    "unbind": {
+      "alt-cmd-t": [
+        "pane::CloseOtherItems",
+        {
+          "close_pinned": false
+        }
+      ]
+    }
+  },
+  {
+    "context": "AcpThread > Editor",
+    "unbind": {
+      "alt-cmd-k": "agent::ToggleThinkingMode"
+    }
+  }
 ]

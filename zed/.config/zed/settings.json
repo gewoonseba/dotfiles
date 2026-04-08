@@ -19,9 +19,10 @@
     "auto_reveal_entries": true,
   },
   "agent_servers": {
-    "claude": {
-      "default_model": "default",
-    },
+    "claude-acp": {
+      "type": "registry",
+      "default_model": "default"
+    }
   },
   "terminal": {
     "shell": {
