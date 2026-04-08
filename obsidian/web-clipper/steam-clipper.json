@@ -1,0 +1,68 @@
+{
+	"schemaVersion": "0.1.0",
+	"name": "Steam",
+	"behavior": "create",
+	"noteNameFormat": "{{selector:#appHubAppName}}",
+	"path": "References",
+	"noteContentFormat": "{{selector:.game_description_snippet}}",
+	"properties": [
+		{
+			"name": "categories",
+			"value": "[[Games]]",
+			"type": "multitext"
+		},
+		{
+			"name": "maker",
+			"value": "{{selector:#developers_list a|unique|wikilink|join}}",
+			"type": "multitext"
+		},
+		{
+			"name": "genre",
+			"value": "{{selector:.app_tag|unique|trim|wikilink|join}}",
+			"type": "multitext"
+		},
+		{
+			"name": "year",
+			"value": "{{selector:.release_date .date|split:\", \"|last}}",
+			"type": "number"
+		},
+		{
+			"name": "system",
+			"value": "[[Steam]]",
+			"type": "multitext"
+		},
+		{
+			"name": "cover",
+			"value": "{{meta:property:og:image}}",
+			"type": "text"
+		},
+		{
+			"name": "rating",
+			"value": "",
+			"type": "number"
+		},
+		{
+			"name": "source",
+			"value": "{{url}}",
+			"type": "text"
+		},
+		{
+			"name": "created",
+			"value": "{{date}}",
+			"type": "date"
+		},
+		{
+			"name": "last",
+			"value": "{{date}}",
+			"type": "date"
+		},
+		{
+			"name": "tags",
+			"value": "games, to-play",
+			"type": "multitext"
+		}
+	],
+	"triggers": [
+		"https://store.steampowered.com/app/"
+	]
+}
