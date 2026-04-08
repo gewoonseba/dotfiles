@@ -352,7 +352,12 @@ cmd_mcp() {
     fi
 
     # Stop any existing MCP server
-    pkill -f "uvicorn app.main:app --port $port" 2>/dev/null && sleep 1 || true
+    local mcp_pids
+    mcp_pids=$(lsof -ti :"$port" 2>/dev/null || true)
+    if [ -n "$mcp_pids" ]; then
+        echo "$mcp_pids" | xargs kill -9 2>/dev/null || true
+        sleep 1
+    fi
 
     # Set environment-specific config
     local dashboard_url disable_auth
@@ -405,17 +410,20 @@ cmd_mcp() {
 cmd_stop() {
     local killed=0
 
-    if pkill -f 'uvicorn app.main:app' 2>/dev/null; then
-        echo "Stopped backend (uvicorn)"
+    local pids
+    pids=$(lsof -ti :8000 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+        echo "$pids" | xargs kill -9 2>/dev/null || true
+        echo "Stopped backend (port 8000)"
         killed=1
     fi
 
-    if pkill -f 'vite.*services/frontend' 2>/dev/null; then
-        echo "Stopped frontend (vite)"
+    pids=$(lsof -ti :5173 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+        echo "$pids" | xargs kill -9 2>/dev/null || true
+        echo "Stopped frontend (port 5173)"
         killed=1
     fi
-
-    pkill -f 'npm run dev' 2>/dev/null || true
 
     if [ "$killed" -eq 0 ]; then
         echo "No services running."
