@@ -63,6 +63,7 @@ cmd_new() {
     git -C "$REPO" fetch origin main --quiet
     mkdir -p "$(dirname "$worktree_dir")"
     git -C "$REPO" worktree add -b "$branch" "$worktree_dir" origin/main
+    git -C "$worktree_dir" push -u origin "$branch" --quiet
 
     setup_worktree "$worktree_dir"
 
@@ -421,6 +422,44 @@ cmd_stop() {
     fi
 }
 
+cmd_browse() {
+    local profile="${1:-}"
+    local url="${2:-http://localhost:5173}"
+    local profiles_dir="$HOME/Work/browser-profiles"
+
+    if [ "$profile" = "stop" ]; then
+        if pkill -f 'agent-browser' 2>/dev/null; then
+            echo "Stopped agent-browser"
+        else
+            echo "No agent-browser running."
+        fi
+        return
+    fi
+
+    if [ -z "$profile" ]; then
+        echo "Usage: jt browse <profile> [url]"
+        echo ""
+        echo "Profiles:"
+        for p in "$profiles_dir"/*/; do
+            echo "  $(basename "$p")"
+        done
+        exit 1
+    fi
+
+    if [ ! -d "$profiles_dir/$profile" ]; then
+        echo "Error: unknown profile '$profile'"
+        echo "Available profiles:"
+        for p in "$profiles_dir"/*/; do
+            echo "  $(basename "$p")"
+        done
+        exit 1
+    fi
+
+    agent-browser close 2>/dev/null || true
+    echo "Opening browser: $url (profile: $profile)"
+    agent-browser --profile "$profiles_dir/$profile" --headed open "$url"
+}
+
 cmd_help() {
     cat <<'HELP'
 jt — Jolteon worktree & service manager
@@ -442,6 +481,10 @@ Service commands:
   jt mcp [lcl|dev|prd] [port]  Start MCP service (default: dev, port 8002)
   jt stop                      Stop all services
 
+Browser commands:
+  jt browse <profile> [url]    Open headed browser (default: localhost:5173)
+  jt browse stop               Stop agent-browser
+
 SDK commands:
   jt generate                   Generate the dashboard API TypeScript SDK
 
@@ -456,6 +499,8 @@ Examples:
   jt serve prd
   jt mcp dev
   jt mcp prd 9000
+  jt browse customer
+  jt browse root http://localhost:5173/admin
   jt remove feat/battery-charts
 HELP
 }
@@ -473,6 +518,7 @@ case "${1:-help}" in
     serve)  shift; cmd_serve "${1:-}" ;;
     mcp)    shift; cmd_mcp "${1:-}" "${2:-8002}" ;;
     stop)   cmd_stop ;;
+    browse) shift; cmd_browse "${1:-}" "${2:-}" ;;
     generate|gen) cmd_generate ;;
     help|-h|--help) cmd_help ;;
     *)      echo "Unknown command: $1"; echo "Run 'jt help' for usage."; exit 1 ;;
