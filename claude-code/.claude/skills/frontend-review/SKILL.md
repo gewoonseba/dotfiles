@@ -330,6 +330,27 @@ that duplicates what the shared formatters provide.
 *"This hardcodes a [currency symbol / power unit]. Use `[formatter name]` from `[file]` instead —
 it handles unit scaling and locale formatting automatically."*
 
+### No `'use client'` directives
+
+This is a Vite + React Router application — **not** Next.js. The `'use client'` directive has no
+effect here and is misleading. It commonly appears when copying components from shadcn/ui or other
+Next.js-oriented sources.
+
+Flag any `'use client'` or `'use server'` directives: *"This is a Vite app, not Next.js —
+`'use client'` has no effect here. Remove it."*
+
+### Pin dependency versions in package.json
+
+Dependencies in `package.json` must use **exact pinned versions** (e.g., `"1.4.3"`), not caret
+ranges (`"^1.4.3"`) or tilde ranges (`"~1.4.3"`). The team prefers to manually control when
+dependencies get updated.
+
+Flag any newly introduced caret or tilde ranges: *"Use a pinned version (`X.Y.Z`) instead of
+`^X.Y.Z` — the team manually controls dependency updates."*
+
+**Note:** Some pre-existing dependencies already use caret ranges — only flag ranges that are
+**newly introduced** in the diff, not pre-existing ones.
+
 ### Import hygiene
 - Imports should be at the top of the file
 - Prefer named exports for components

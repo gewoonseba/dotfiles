@@ -7,6 +7,9 @@ set -euo pipefail
 REPO="$HOME/Work/jolteon"
 WORKSPACE="$HOME/Work/workspaces/jolteon"
 
+# Prefer system-installed Python (e.g. Homebrew) over uv-managed downloads
+export UV_PYTHON_PREFERENCE=system
+
 # ─── Helpers ───────────────────────────────────────────────
 
 hint_worktree() {
@@ -45,6 +48,9 @@ setup_worktree() {
 
     echo "Installing frontend dependencies..."
     (cd "$target_dir/services/frontend" && npm i --silent 2>/dev/null)
+
+    echo "Installing pre-commit hooks..."
+    (cd "$target_dir" && uv run pre-commit install)
 }
 
 # ─── Commands ──────────────────────────────────────────────

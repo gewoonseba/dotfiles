@@ -74,5 +74,17 @@
     "unbind": {
       "alt-cmd-k": "agent::ToggleThinkingMode"
     }
+  },
+  {
+    "context": "Editor",
+    "bindings": {
+      "cmd-shift-r": "editor::Rename"
+    }
+  },
+  {
+    "context": "Editor",
+    "unbind": {
+      "f2": "editor::Rename"
+    }
   }
 ]
