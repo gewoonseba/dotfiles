@@ -70,7 +70,7 @@
   "indentRainbow.lightIndicatorStyleLineWidth": 2,
   "terminal.external.linuxExec": "/usr/bin/ghostty",
   "terminal.integrated.defaultProfile.linux": "zsh",
-  "workbench.colorTheme": "Cursor Light",
+  "workbench.colorTheme": "White",
   "claudeCode.selectedModel": "default",
   "claudeCode.preferredLocation": "sidebar",
   "claudeCode.useTerminal": true,
