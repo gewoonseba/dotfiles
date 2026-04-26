@@ -59,7 +59,7 @@ setopt hist_ignore_dups
 setopt hist_find_no_dups
 
 # Set up fzf key bindings and fuzzy completion
-source <(fzf --zsh)
+command -v fzf &> /dev/null && source <(fzf --zsh)
 
 # Setup zinit package manager
 ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
@@ -74,8 +74,8 @@ zinit light zsh-users/zsh-completions
 autoload -U compinit && compinit
 
 # Setup Starship and zoxide
-eval "$(starship init zsh)"
-eval "$(zoxide init zsh)"
+command -v starship &> /dev/null && eval "$(starship init zsh)"
+command -v zoxide &> /dev/null && eval "$(zoxide init zsh)"
 
 # Keybindings
 bindkey '^[[A' history-search-backward
@@ -92,3 +92,4 @@ source "$NVM_DIR/nvm.sh"
 # Setup javm
 command -v javm &> /dev/null || curl -fsSL https://javm.dev/install.sh | bash
 command -v javm &> /dev/null && eval "$(javm init bash)"
+export PATH="$HOME/.npm-global/bin:$PATH"

@@ -6,45 +6,151 @@ set -e
 # Resolve symlinks to get the real script path
 SCRIPT_PATH=$(readlink -f "$0")
 DOTFILES_DIR=$(cd "$(dirname "$SCRIPT_PATH")/../../../" && pwd)
+SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 cd "$DOTFILES_DIR"
 
-echo "󰒓 Starting Master Omarchy Setup from $DOTFILES_DIR"
+echo "󰒓 Master Setup from $DOTFILES_DIR"
 
-# --- Run Sub-modules ---
-# We call them relative to this script's directory
-SCRIPT_DIR=$(dirname "$0")
+# --- Bootstrap: ensure baseline dependencies are installed ---
+# Setup needs curl/stow/fzf to function. The stowed .zshrc also unguardedly
+# sources fzf/starship/zoxide on shell startup, so we install those here too
+# to avoid "command not found" errors on a fresh machine.
+install_pkgs() {
+    local pkgs=("$@")
+    [ ${#pkgs[@]} -eq 0 ] && return 0
 
-if [ -f "$SCRIPT_DIR/rsync-install" ]; then
-    bash "$SCRIPT_DIR/rsync-install"
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        case "${ID}:${ID_LIKE:-}" in
+            arch:*|*:*arch*|manjaro:*|endeavouros:*)
+                if command -v yay &> /dev/null; then
+                    yay -S --noconfirm --needed "${pkgs[@]}"
+                else
+                    sudo pacman -S --noconfirm --needed "${pkgs[@]}"
+                fi
+                ;;
+            ubuntu:*|debian:*|pop:*|linuxmint:*|*:*debian*)
+                sudo apt-get update
+                sudo apt-get install -y "${pkgs[@]}"
+                ;;
+            *)
+                echo "󰅙 Error: Unsupported Linux distribution: ${ID}"
+                echo "  Install manually: ${pkgs[*]}"
+                exit 1
+                ;;
+        esac
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        if ! command -v brew &> /dev/null; then
+            echo "  Installing Homebrew..."
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        fi
+        brew install "${pkgs[@]}"
+    else
+        echo "󰅙 Error: Unsupported OS: $OSTYPE"
+        exit 1
+    fi
+}
+
+bootstrap_deps() {
+    # Baseline tools available in every package manager
+    local pkg_missing=()
+    for cmd in curl stow fzf; do
+        command -v "$cmd" &> /dev/null || pkg_missing+=("$cmd")
+    done
+    if [ ${#pkg_missing[@]} -gt 0 ]; then
+        echo "󰇚 Installing baseline packages: ${pkg_missing[*]}"
+        install_pkgs "${pkg_missing[@]}"
+    fi
+
+    # Tools whose distro packaging is patchy — use their official installers.
+    if ! command -v starship &> /dev/null; then
+        echo "󰇚 Installing starship..."
+        mkdir -p "$HOME/.local/bin"
+        curl -sS https://starship.rs/install.sh | sh -s -- -y -b "$HOME/.local/bin"
+    fi
+    if ! command -v zoxide &> /dev/null; then
+        echo "󰇚 Installing zoxide..."
+        curl -sSfL https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | sh
+    fi
+}
+
+bootstrap_deps
+
+# Available tools — order here is the install order
+# Format: "<script-name>|<description>"
+TOOLS=(
+    "rsync-install|rsync (file sync)"
+    "node-install|Node.js + npm (via nvm)"
+    "uv-install|uv (Python package manager)"
+    "claude-install|Claude Code CLI"
+    "zed-install|Zed editor"
+    "git-worktree-runner-install|git-worktree-runner"
+    "tod-install|tod (todo CLI)"
+)
+
+# Keep only tools whose script actually exists
+AVAILABLE=()
+for entry in "${TOOLS[@]}"; do
+    script="${entry%%|*}"
+    if [ -f "$SCRIPT_DIR/$script" ]; then
+        AVAILABLE+=("$entry")
+    fi
+done
+
+if [ ${#AVAILABLE[@]} -eq 0 ]; then
+    echo "  No installable scripts found in $SCRIPT_DIR"
+    exit 0
 fi
 
-if [ -f "$SCRIPT_DIR/tod-install" ]; then
-    bash "$SCRIPT_DIR/tod-install"
+# Show fzf multi-select.
+# fzf --multi: Tab/Space toggles, Enter confirms, Esc cancels.
+# Ctrl-A selects all.
+mapfile -t SELECTED_SCRIPTS < <(
+    printf '%s\n' "${AVAILABLE[@]}" \
+        | awk -F'|' '{ printf "%-32s  %s\n", $1, $2 }' \
+        | fzf --multi \
+              --height=50% \
+              --reverse \
+              --no-info \
+              --bind 'ctrl-a:select-all,ctrl-d:deselect-all' \
+              --header=$'Space/Tab: toggle  ·  Ctrl-A: all  ·  Enter: install  ·  Esc: cancel\n' \
+              --prompt='Tools ❯ ' \
+        | awk '{print $1}'
+)
+
+if [ ${#SELECTED_SCRIPTS[@]} -eq 0 ]; then
+    echo "  Nothing selected. Exiting."
+    exit 0
 fi
 
-if [ -f "$SCRIPT_DIR/claude-install" ]; then
-    bash "$SCRIPT_DIR/claude-install"
-fi
-
-if [ -f "$SCRIPT_DIR/zed-install" ]; then
-    bash "$SCRIPT_DIR/zed-install"
-fi
-
-if [ -f "$SCRIPT_DIR/git-worktree-runner-install" ]; then
-    bash "$SCRIPT_DIR/git-worktree-runner-install"
-fi
+# Run in TOOLS order (not selection order), so dependencies stay correct
+echo ""
+echo "󰄬 Installing ${#SELECTED_SCRIPTS[@]} tool(s)..."
+for entry in "${TOOLS[@]}"; do
+    script="${entry%%|*}"
+    for sel in "${SELECTED_SCRIPTS[@]}"; do
+        if [ "$sel" = "$script" ]; then
+            echo ""
+            echo "── $script ──────────────────────────────"
+            bash "$SCRIPT_DIR/$script"
+            break
+        fi
+    done
+done
 
 # --- Global Stow ---
+echo ""
 echo "󰛢 Stowing configurations..."
 STOW_FOLDERS="xremap scripts"
 
 for folder in $STOW_FOLDERS; do
     if [ -d "$folder" ]; then
-        # We stow from the root. Stow handles the internal paths automatically.
         stow -D "$folder" 2>/dev/null || true
         stow "$folder"
         echo "  󰄬 Stowed $folder"
     fi
 done
 
+echo ""
 echo "󰄬 System ready. If this is a first-time setup, log out and back in."

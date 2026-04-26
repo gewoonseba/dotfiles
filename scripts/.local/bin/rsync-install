@@ -5,30 +5,46 @@ set -e
 
 echo "󰄬 Installing rsync..."
 
-# Detect OS
+confirm_reinstall() {
+    CURRENT_VERSION=$(rsync --version | head -n1)
+    echo "  rsync is already installed: $CURRENT_VERSION"
+    read -p "  Reinstall/upgrade? [y/N] " -n 1 -r
+    echo
+    [[ $REPLY =~ ^[Yy]$ ]]
+}
+
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    # Linux
-    if ! command -v yay &> /dev/null; then
-        echo "󰅙 Error: yay is required but not installed."
-        exit 1
-    fi
-
-    if command -v rsync &> /dev/null; then
-        CURRENT_VERSION=$(rsync --version | head -n1)
-        echo "  rsync is already installed: $CURRENT_VERSION"
-        read -p "  Reinstall/upgrade? [y/N] " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            echo "  Skipping installation."
-            exit 0
-        fi
-    fi
-
-    echo "  Installing rsync via yay..."
-    yay -S --noconfirm rsync
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    case "${ID}:${ID_LIKE:-}" in
+        arch:*|*:*arch*|manjaro:*|endeavouros:*)
+            if ! command -v yay &> /dev/null; then
+                echo "󰅙 Error: yay is required but not installed."
+                exit 1
+            fi
+            if command -v rsync &> /dev/null && ! confirm_reinstall; then
+                echo "  Skipping installation."
+                exit 0
+            fi
+            echo "  Installing rsync via yay..."
+            yay -S --noconfirm rsync
+            ;;
+        ubuntu:*|debian:*|pop:*|linuxmint:*|*:*debian*)
+            if command -v rsync &> /dev/null && ! confirm_reinstall; then
+                echo "  Skipping installation."
+                exit 0
+            fi
+            echo "  Installing rsync via apt..."
+            sudo apt-get update
+            sudo apt-get install -y rsync
+            ;;
+        *)
+            echo "󰅙 Error: Unsupported Linux distribution: ${ID}"
+            exit 1
+            ;;
+    esac
 
 elif [[ "$OSTYPE" == "darwin"* ]]; then
-    # macOS
     if ! command -v brew &> /dev/null; then
         echo "󰅙 Error: Homebrew is required but not installed."
         exit 1

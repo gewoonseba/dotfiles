@@ -11,15 +11,9 @@ DOTFILES_DIR=$(cd "$(dirname "$SCRIPT_PATH")/../../../" && pwd)
 
 echo "󰄬 Installing Zed editor..."
 
-# Detect platform
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    # Linux installation via yay
-    if ! command -v yay &> /dev/null; then
-        echo "󰅙 Error: yay is required but not installed."
-        exit 1
-    fi
-
-    # Check if zed is already installed
+    # The official zed.dev installer auto-detects the distro and works
+    # across Arch, Ubuntu, Debian, Fedora, etc.
     if command -v zed &> /dev/null; then
         CURRENT_VERSION=$(zed --version 2>/dev/null || echo "unknown")
         echo "  Zed is already installed: $CURRENT_VERSION"
@@ -27,12 +21,15 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             echo "  Skipping installation."
-            exit 0
+            # Still stow config below
+        else
+            echo "  Installing Zed via official installer..."
+            curl -f https://zed.dev/install.sh | sh
         fi
+    else
+        echo "  Installing Zed via official installer..."
+        curl -f https://zed.dev/install.sh | sh
     fi
-
-    echo "  Installing zed from AUR..."
-    yay -S --noconfirm zed
 
 elif [[ "$OSTYPE" == "darwin"* ]]; then
     # macOS installation via Homebrew

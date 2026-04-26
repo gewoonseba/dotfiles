@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -e
+
+# uv-install - Install uv (Python package + project manager from Astral)
+# Cross-platform: works on Linux and macOS.
+
+echo "󰌠 Installing uv..."
+
+if command -v uv &> /dev/null; then
+    echo "  󰄬 uv is already installed: $(uv --version)"
+    read -p "  Reinstall/upgrade? [y/N] " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "  Skipping installation."
+        exit 0
+    fi
+fi
+
+echo "  󰇚 Downloading uv..."
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# uv installs to ~/.local/bin which is already on PATH per .zshrc
+if command -v uv &> /dev/null; then
+    echo "󰄬 uv installed successfully: $(uv --version)"
+else
+    echo "  ⚠ uv installed but not yet on PATH — restart your shell"
+fi
