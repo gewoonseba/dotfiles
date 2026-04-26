@@ -1,2 +1,0 @@
-#!/bin/bash
-exec npx --yes @mariozechner/pi-coding-agent "$@"

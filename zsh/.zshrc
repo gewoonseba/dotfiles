@@ -1,4 +1,8 @@
-export PATH=$PATH:$HOME/.local/bin
+# Source secrets (not tracked in git)
+[ -f ~/.secrets ] && source ~/.secrets
+
+export PNPM_HOME="$HOME/.local/share/pnpm"
+export PATH=$PATH:$HOME/.local/bin:$PNPM_HOME
 
 # Aliases, taken from ~/.local/share/omarchy/default/bash/aliases
 

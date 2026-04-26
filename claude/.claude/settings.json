@@ -52,8 +52,13 @@
         "source": "github",
         "repo": "akatz-ai/cc-conversation-search"
       }
+    },
+    "wiki-skills": {
+      "source": {
+        "source": "github",
+        "repo": "kfchou/wiki-skills"
+      }
     }
   },
-  "effortLevel": "high",
-  "skipAutoPermissionPrompt": true
+  "effortLevel": "high"
 }
