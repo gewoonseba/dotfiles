@@ -15,12 +15,12 @@ Run a two-phase QA process on the current branch's frontend changes: first build
 
 ## How it works
 
-This skill orchestrates two subagents in sequence:
+This skill orchestrates two subagents in sequence and **always runs end-to-end without pausing for approval**:
 
-1. **Planning Agent (you spawn first)** — Analyzes the git diff against `main`, understands what changed, and produces a structured testing plan. You present this plan to the user and iterate on it until they approve.
-2. **Testing Agent (you spawn after approval)** — Takes the approved plan and executes each test case in a local browser using the `/browser` skill. Writes an HTML test report with pass/fail results and embedded screenshots.
+1. **Planning Agent (you spawn first)** — Analyzes the git diff against `main`, understands what changed, and produces a structured testing plan.
+2. **Testing Agent (you spawn immediately after planning)** — Takes the plan and executes each test case in a local browser using the `/browser` skill. Writes an HTML test report with pass/fail results, embedded screenshots, and the exact URL for each test case so the user can re-verify themselves.
 
-You (the orchestrator) manage the handoff between these phases. The user interacts with you, not directly with the subagents.
+You (the orchestrator) manage the handoff between these phases. Do not stop to ask for plan approval — go straight from planning to testing in one pass. The user can review the report and ask for changes after the run finishes.
 
 ## Phase 1: Build the testing plan
 
@@ -89,7 +89,7 @@ Brief description of what changed and the overall testing strategy.
 #### Broad Strokes
 
 **TC-01: [Descriptive name]**
-- Page/URL: [full URL path, e.g., /app/orgs/{customerId}/control-room]
+- Page/URL: [full URL — must be a complete clickable URL including the dev server origin, e.g., http://localhost:5173/app/orgs/{customerId}/control-room]
 - Steps:
   1. [Concrete step — mention specific button labels, menu items, form fields]
   2. ...
@@ -99,7 +99,7 @@ Brief description of what changed and the overall testing strategy.
 #### Edge Cases
 
 **TC-05: [Descriptive name]**
-- Page/URL: [full URL path]
+- Page/URL: [full clickable URL including origin]
 - Steps:
   1. [Concrete step]
   2. ...
@@ -107,23 +107,17 @@ Brief description of what changed and the overall testing strategy.
 - Why: [What edge case this covers]
 ```
 
-Test cases need to be specific enough that someone (or an agent) unfamiliar with the app can follow them step by step. Use actual button labels, menu names, and URL paths rather than vague descriptions.
+Test cases need to be specific enough that someone (or an agent) unfamiliar with the app can follow them step by step. Use actual button labels, menu names, and URL paths rather than vague descriptions. Every test case **must** include a complete URL (with origin) so the user can open it directly to reproduce the test themselves.
 
-### User review loop
+### Hand off straight to testing
 
-When the planning agent returns the plan, present it to the user. Then iterate:
-
-- If the user requests changes ("add a test for X", "remove TC-03", "focus more on the table"), update the plan accordingly and present the new version.
-- If the user adds context ("the dev server runs on port 3000", "use customer ID abc-123"), incorporate it into the prerequisites or test steps.
-- If the user says something affirmative ("looks good", "let's go", "approved", "run it"), move on to Phase 2.
-
-Stay in this loop until you get explicit approval. Don't proceed to the testing phase on your own — the user knows their feature best and might catch important gaps.
+As soon as the planning agent returns the plan, move on to Phase 2 — do not pause to ask the user for approval. The user will review the report and request changes after the run completes. Make reasonable assumptions for prerequisites (default dev server URL `http://localhost:5173`, currently logged-in user/customer) and document those assumptions in the plan and the report.
 
 ## Phase 2: Execute the tests
 
 ### Spawn the Testing Agent
 
-Once the plan is approved, spawn a subagent to run the tests. Pass the complete approved testing plan to this agent.
+Immediately after Phase 1 produces the plan, spawn a subagent to run the tests. Pass the complete plan to this agent. There is no approval step in between.
 
 The testing agent's instructions:
 
@@ -275,6 +269,10 @@ The HTML file should be completely self-contained — inline all CSS and embed s
     <!-- Repeat for each test case -->
     <div class="test-case {status}">
       <h3><span class="badge {status}">{STATUS}</span> TC-01: {name}</h3>
+      <p>
+        <strong>URL:</strong>
+        <a href="{full-url}" target="_blank" rel="noopener">{full-url}</a>
+      </p>
       <p><strong>Steps taken:</strong></p>
       <ol>
         <li>{what was actually done}</li>
@@ -301,6 +299,7 @@ After the testing agent finishes and you have the report, tell the user:
 
 - Where the report file is saved (the path within the project)
 - A quick tally: X passed, Y failed, Z blocked
+- For each test case, the **full URL** the test ran against, so the user can open it and re-validate the same scenario themselves
 - For any failures, a one-line summary of what went wrong
 
 If there are failures, give your best assessment of whether they look like genuine bugs, environment/data issues, or possible flakiness.
