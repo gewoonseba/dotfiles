@@ -15,12 +15,12 @@ Run a two-phase QA process on the current branch's frontend changes: first build
 
 ## How it works
 
-This skill orchestrates two subagents in sequence and **always runs end-to-end without pausing for approval**:
+This skill orchestrates two subagents in sequence:
 
 1. **Planning Agent (you spawn first)** — Analyzes the git diff against `main`, understands what changed, and produces a structured testing plan.
-2. **Testing Agent (you spawn immediately after planning)** — Takes the plan and executes each test case in a local browser using the `/browser` skill. Writes an HTML test report with pass/fail results, embedded screenshots, and the exact URL for each test case so the user can re-verify themselves.
+2. **Testing Agent (you spawn after the plan is ready)** — Takes the plan and executes each test case in a local browser using the `/browser` skill. Writes an HTML test report with pass/fail results, embedded screenshots, and the exact URL for each test case so the user can re-verify themselves.
 
-You (the orchestrator) manage the handoff between these phases. Do not stop to ask for plan approval — go straight from planning to testing in one pass. The user can review the report and ask for changes after the run finishes.
+You (the orchestrator) manage the handoff. By default, **do not gate on user approval between phases** — proceed straight from the plan to execution. The user can interrupt if they want to redirect.
 
 ## Phase 1: Build the testing plan
 
@@ -109,15 +109,23 @@ Brief description of what changed and the overall testing strategy.
 
 Test cases need to be specific enough that someone (or an agent) unfamiliar with the app can follow them step by step. Use actual button labels, menu names, and URL paths rather than vague descriptions. Every test case **must** include a complete URL (with origin) so the user can open it directly to reproduce the test themselves.
 
-### Hand off straight to testing
+### Present the plan and proceed
 
-As soon as the planning agent returns the plan, move on to Phase 2 — do not pause to ask the user for approval. The user will review the report and request changes after the run completes. Make reasonable assumptions for prerequisites (default dev server URL `http://localhost:5173`, currently logged-in user/customer) and document those assumptions in the plan and the report.
+When the planning agent returns the plan, give the user a concise summary (1–2 sentences naming the feature under test plus the test-case count) and **proceed straight to Phase 2 in the same turn**. Do not ask for approval by default — running QA is the explicit ask. Make reasonable assumptions for prerequisites (default dev server URL `http://localhost:5173`, currently logged-in user/customer) and document those assumptions in the plan and the report.
+
+Only pause for confirmation if:
+
+- The user invoked the skill with explicit review intent ("draft a QA plan", "let me review the plan first", "show me the plan before running").
+- The plan is missing critical info that the agent couldn't infer (dev server URL, login credentials, specific customer ID required to reach the feature).
+- The plan looks materially off — e.g., the agent inferred the wrong feature, or the diff is genuinely ambiguous.
+
+In all other cases, announce the plan briefly and start the testing agent. The user can interrupt mid-run if they want to redirect; otherwise they'll see the report when it's done.
 
 ## Phase 2: Execute the tests
 
 ### Spawn the Testing Agent
 
-Immediately after Phase 1 produces the plan, spawn a subagent to run the tests. Pass the complete plan to this agent. There is no approval step in between.
+Immediately after Phase 1 produces the plan, spawn a subagent to run the tests. Pass the complete testing plan to this agent. There is no approval step in between.
 
 The testing agent's instructions:
 
@@ -127,9 +135,10 @@ For each test case in the plan:
 
 1. **Navigate** to the specified URL using the browser.
 2. **Execute each step** as described — click buttons, fill forms, interact with the UI.
-3. **Take a screenshot** at key moments: after page load, after each significant interaction, and at the final state. Save screenshots to `.context/qa-reports/screenshots/` with descriptive names like `TC-01-step-2-table-loaded.png`.
+3. **Take a screenshot** at key moments: after page load, after each significant interaction, and at the final state. Save screenshots to `.context/qa-reports/screenshots/` with descriptive names like `TC-01-step-2-table-loaded.png`. Every screenshot you save **must** end up in the report with a caption underneath it — see "Screenshot captions" below for what that caption needs to say.
 4. **Evaluate the result**: Compare what you see on screen against the "Expected" outcome.
    - **PASS** — The actual behavior matches the expected outcome.
+   - **PASS-WITH-CAVEAT** — Behavior is acceptable but with a notable observation (minor visual quirk, slow load, intermediate flicker that resolves correctly).
    - **FAIL** — Something doesn't match. Describe exactly what you see vs what was expected.
    - **BLOCKED** — You can't execute this test (auth issues, missing data, server down). Explain why.
 5. **Note observations**: Even on a PASS, note anything unusual — slow loading, console errors, visual glitches, things that work but look off.
@@ -145,161 +154,297 @@ After executing all test cases, write a self-contained HTML report.
 - Use the branch name sanitized for filenames (replace `/` with `-`).
 - Date format: `YYYY-MM-DD-HHmm`.
 
-**Report structure:**
-
-The HTML file should be completely self-contained — inline all CSS and embed screenshots as base64 data URIs so the file can be opened standalone without any dependencies.
+**Report format — match this layout exactly.** It is the canonical QA report style: card-based, CSS-variable-driven, with a 5-card summary header (Total / Passed / Pass w/ caveat / Failed / Blocked) and per-test sections using `Customer / Asset` → `Method` → `Findings` → `Screenshots` labels. The HTML must be self-contained: inline all CSS and embed screenshots as base64 data URIs so the file opens standalone.
 
 ```html
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
+    <meta charset="utf-8" />
     <title>QA Report — {branch-name}</title>
     <style>
-      body {
-        font-family:
-          system-ui,
-          -apple-system,
-          sans-serif;
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: 2rem;
-        color: #1a1a1a;
+      :root {
+        --bg: #f9fafb;
+        --card-bg: #ffffff;
+        --border: #e5e7eb;
+        --text: #111827;
+        --muted: #6b7280;
+        --code-bg: #f3f4f6;
       }
-      h1 {
-        border-bottom: 2px solid #e5e7eb;
-        padding-bottom: 0.5rem;
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        font:
+          14px/1.5 -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          system-ui,
+          sans-serif;
+        color: var(--text);
+        background: var(--bg);
+        margin: 0;
+        padding: 24px;
+      }
+      .container {
+        max-width: 1100px;
+        margin: 0 auto;
+      }
+      header {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 24px;
+        margin-bottom: 24px;
+      }
+      header h1 {
+        margin: 0 0 8px;
+        font-size: 22px;
+      }
+      header .meta {
+        color: var(--muted);
+        margin-bottom: 16px;
       }
       .summary {
-        background: #f8f9fa;
-        padding: 1.5rem;
-        border-radius: 8px;
-        margin-bottom: 2rem;
-      }
-      .summary-stats {
         display: flex;
-        gap: 2rem;
-        margin-top: 1rem;
+        gap: 16px;
+        flex-wrap: wrap;
       }
-      .stat {
-        font-size: 1.5rem;
-        font-weight: 700;
+      .summary-card {
+        flex: 1;
+        min-width: 140px;
+        padding: 16px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        text-align: center;
+        background: #fafafa;
       }
-      .stat.pass {
-        color: #16a34a;
+      .summary-card .num {
+        font-size: 28px;
+        font-weight: 600;
       }
-      .stat.fail {
-        color: #dc2626;
+      .summary-card .label {
+        font-size: 12px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
       }
-      .stat.blocked {
-        color: #d97706;
-      }
-      .test-case {
-        border: 1px solid #e5e7eb;
+      .test {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
         border-radius: 8px;
-        margin-bottom: 1.5rem;
-        padding: 1.5rem;
+        padding: 20px;
+        margin-bottom: 16px;
       }
-      .test-case.fail {
-        border-color: #fca5a5;
-        background: #fef2f2;
+      .test-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 12px;
+        flex-wrap: wrap;
       }
-      .test-case.pass {
-        border-color: #bbf7d0;
+      .test-id {
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-weight: 600;
+        font-size: 14px;
+        color: var(--muted);
       }
-      .test-case.blocked {
-        border-color: #fde68a;
-        background: #fffbeb;
-      }
-      .screenshot {
-        max-width: 100%;
-        border: 1px solid #e5e7eb;
-        border-radius: 4px;
-        margin: 0.5rem 0;
+      .test-title {
+        font-size: 16px;
+        font-weight: 600;
+        flex: 1;
       }
       .badge {
         display: inline-block;
-        padding: 0.25rem 0.75rem;
-        border-radius: 9999px;
+        padding: 4px 10px;
+        border-radius: 4px;
+        color: white;
+        font-size: 12px;
         font-weight: 600;
-        font-size: 0.875rem;
+        letter-spacing: 0.3px;
       }
-      .badge.pass {
-        background: #dcfce7;
-        color: #16a34a;
+      .test-section {
+        margin-top: 12px;
       }
-      .badge.fail {
-        background: #fee2e2;
-        color: #dc2626;
-      }
-      .badge.blocked {
-        background: #fef3c7;
-        color: #d97706;
-      }
-      details {
-        margin-top: 1rem;
-      }
-      summary {
-        cursor: pointer;
+      .test-section-label {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--muted);
         font-weight: 600;
+        margin-bottom: 4px;
       }
-      .notes {
-        background: #f1f5f9;
-        padding: 0.75rem 1rem;
+      .test-section-content {
+        font-size: 14px;
+      }
+      code,
+      .test-section-content code {
+        background: var(--code-bg);
+        padding: 1px 5px;
+        border-radius: 3px;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 12.5px;
+      }
+      .screenshots {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .screenshot {
+        border: 1px solid var(--border);
         border-radius: 6px;
-        margin-top: 0.75rem;
-        font-size: 0.9rem;
+        overflow: hidden;
+        background: #fafafa;
+      }
+      .screenshot img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .screenshot .caption {
+        padding: 8px 10px;
+        font-size: 12px;
+        color: var(--muted);
+        border-top: 1px solid var(--border);
+        background: white;
+      }
+      footer {
+        margin-top: 32px;
+        padding: 16px;
+        text-align: center;
+        color: var(--muted);
+        font-size: 12px;
       }
     </style>
   </head>
   <body>
-    <h1>QA Report</h1>
+    <div class="container">
+      <header>
+        <h1>QA Report — {branch-name}</h1>
+        <div class="meta">
+          Branch: <code>{branch-name}</code> &middot; Date: {YYYY-MM-DD HH:MM}
+          &middot; Tester: {tester-email-or-name}
+        </div>
+        <div class="summary">
+          <div class="summary-card">
+            <div class="num">{total}</div>
+            <div class="label">Total tests</div>
+          </div>
+          <div class="summary-card" style="border-color:#10b981">
+            <div class="num" style="color:#10b981">{passed}</div>
+            <div class="label">Passed</div>
+          </div>
+          <div class="summary-card" style="border-color:#f59e0b">
+            <div class="num" style="color:#f59e0b">{caveat}</div>
+            <div class="label">Pass w/ caveat</div>
+          </div>
+          <div class="summary-card" style="border-color:#ef4444">
+            <div class="num" style="color:#ef4444">{failed}</div>
+            <div class="label">Failed</div>
+          </div>
+          <div class="summary-card" style="border-color:#6b7280">
+            <div class="num" style="color:#6b7280">{blocked}</div>
+            <div class="label">Blocked</div>
+          </div>
+        </div>
+      </header>
 
-    <div class="summary">
-      <p><strong>Branch:</strong> {branch-name}</p>
-      <p><strong>Date:</strong> {timestamp}</p>
-      <p><strong>Commit:</strong> {short-sha} — {commit-message}</p>
-      <div class="summary-stats">
-        <div><span class="stat pass">{n}</span> passed</div>
-        <div><span class="stat fail">{n}</span> failed</div>
-        <div><span class="stat blocked">{n}</span> blocked</div>
-      </div>
-    </div>
+      <!-- Repeat one <section class="test"> per test case -->
+      <section class="test">
+        <div class="test-header">
+          <span class="test-id">TC-01</span>
+          <span class="test-title">{test title}</span>
+          <span class="badge" style="background:#10b981">PASS</span>
+        </div>
+        <div class="test-section">
+          <div class="test-section-label">URL</div>
+          <div class="test-section-content">
+            <a href="{full-url}" target="_blank" rel="noopener"><code>{full-url}</code></a>
+          </div>
+        </div>
+        <div class="test-section">
+          <div class="test-section-label">Customer / Asset</div>
+          <div class="test-section-content">
+            {customer name and asset/group context — what was the test
+            environment}
+          </div>
+        </div>
+        <div class="test-section">
+          <div class="test-section-label">Method</div>
+          <div class="test-section-content">
+            {what the testing agent actually did — concrete steps, any
+            throttling or interception used, navigation path, inline
+            <code>code</code> for selectors/URLs/values}
+          </div>
+        </div>
+        <div class="test-section">
+          <div class="test-section-label">Findings</div>
+          <div class="test-section-content">
+            {what was observed and why it passes/fails — reference the expected
+            outcome from the plan, note any caveats}
+          </div>
+        </div>
+        <div class="test-section">
+          <div class="test-section-label">Screenshots</div>
+          <div class="screenshots">
+            <div class="screenshot">
+              <img src="data:image/png;base64,{...}" alt="{caption}" />
+              <div class="caption">
+                {short caption — what the screenshot shows}
+              </div>
+            </div>
+            <!-- additional screenshots as siblings inside .screenshots -->
+          </div>
+        </div>
+      </section>
 
-    <!-- Repeat for each test case -->
-    <div class="test-case {status}">
-      <h3><span class="badge {status}">{STATUS}</span> TC-01: {name}</h3>
-      <p>
-        <strong>URL:</strong>
-        <a href="{full-url}" target="_blank" rel="noopener">{full-url}</a>
-      </p>
-      <p><strong>Steps taken:</strong></p>
-      <ol>
-        <li>{what was actually done}</li>
-      </ol>
-      <p><strong>Expected:</strong> {from the plan}</p>
-      <p><strong>Actual:</strong> {what actually happened}</p>
-      <div class="notes">{observations, console errors, etc.}</div>
-      <details>
-        <summary>Screenshots ({n})</summary>
-        <img
-          class="screenshot"
-          src="data:image/png;base64,{...}"
-          alt="TC-01 step 1 — page loaded"
-        />
-      </details>
+      <footer>
+        Generated by frontend-qa skill — agent-browser{, plus any extras like
+        CDP Fetch interception}.<br />
+        Test artefacts: <code>.context/qa-reports/screenshots/</code>{, helper
+        scripts: <code>.context/qa-scripts/</code> if used}
+      </footer>
     </div>
   </body>
 </html>
 ```
 
+**Status badge colors (use inline `style="background:#..."`):**
+
+- `PASS` → `#10b981` (green)
+- `PASS-WITH-CAVEAT` → `#f59e0b` (amber)
+- `FAIL` → `#ef4444` (red)
+- `BLOCKED` → `#6b7280` (gray)
+
+**Per-test layout rules:**
+
+- Always include `URL`, `Customer / Asset`, `Method`, `Findings`, `Screenshots` sections in that order. The `URL` must be a complete clickable link (with origin) so the user can open it and reproduce the test. Omit a section only if genuinely empty (e.g., a test with no screenshots).
+- Use inline `<code>` for URLs, selectors, UUIDs, query params, function names, and short literal values. It keeps findings scannable.
+- Section labels are uppercase, letter-spaced, muted — never restyle them.
+- Screenshots go in the `.screenshots` grid; do not stack them in a single column.
+
+**Screenshot captions — required, one per screenshot.** A caption is a short *explainer*, not a label. The reader should be able to glance at the image + caption and instantly understand what they're seeing without reading the surrounding test prose. Aim for 8–20 words.
+
+A good caption answers at least two of:
+- What state is shown? (e.g. "debugger toggle ON", "empty state", "after submit")
+- What page or component? (e.g. "/settings/profile, Super Admin Settings card")
+- What's notable in this frame? (e.g. "Bug icon and orange Switch present", "Subscription Debugger row absent")
+
+Do NOT write captions that just restate the test ID, the test title, or the file name — those add nothing. Bad: "TC-01 screenshot 1". Good: "Admin dropdown open — orange `Subscription debugger` row with Bug icon visible above Log out."
+
+Use inline `<code>` inside captions for literal labels, URLs, or key names — same as in `Findings`.
+- Keep each `Findings` block to 1–4 sentences. If there's deeper detail, put it in a follow-up paragraph inside the same `test-section-content` rather than a new section.
+
+**Do not deviate from the layout.** No collapsibles (`<details>`/`<summary>`), no tabs, no extra columns, no theming swaps. The format is intentionally narrow and stable so reports compare cleanly across branches.
+
 ### Report delivery
 
-After the testing agent finishes and you have the report, tell the user:
+After the testing agent finishes and you have the report:
 
-- Where the report file is saved (the path within the project)
-- A quick tally: X passed, Y failed, Z blocked
-- For each test case, the **full URL** the test ran against, so the user can open it and re-validate the same scenario themselves
-- For any failures, a one-line summary of what went wrong
+- Open the report in a `/browser` session that is headed so the user can see the result, and tell them where the file is saved (the path within the project).
+- A quick tally: X passed, Y caveat, Z failed, W blocked.
+- For each test case, the **full URL** the test ran against, so the user can open it and re-validate the same scenario themselves.
+- For any failures, a one-line summary of what went wrong.
 
 If there are failures, give your best assessment of whether they look like genuine bugs, environment/data issues, or possible flakiness.

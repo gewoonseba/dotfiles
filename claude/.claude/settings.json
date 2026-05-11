@@ -35,7 +35,7 @@
       "Read(//Users/sebastianstoelen/Work/notes/Notes/**)",
       "Bash(echo \"EXIT:$?\")"
     ],
-    "defaultMode": "default"
+    "defaultMode": "auto"
   },
   "hooks": {},
   "statusLine": {
@@ -44,7 +44,8 @@
   },
   "enabledPlugins": {
     "conversation-search@cc-conversation-search": true,
-    "figma@claude-plugins-official": true
+    "figma@claude-plugins-official": true,
+    "paper-desktop@paper": true
   },
   "extraKnownMarketplaces": {
     "cc-conversation-search": {
@@ -58,7 +59,17 @@
         "source": "github",
         "repo": "kfchou/wiki-skills"
       }
+    },
+    "paper": {
+      "source": {
+        "source": "github",
+        "repo": "paper-design/agent-plugins"
+      }
     }
   },
-  "effortLevel": "high"
+  "effortLevel": "high",
+  "tui": "fullscreen",
+  "skipDangerousModePermissionPrompt": true,
+  "remoteControlAtStartup": true,
+  "skipAutoPermissionPrompt": true
 }
