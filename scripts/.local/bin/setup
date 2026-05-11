@@ -150,7 +150,7 @@ if [ ! -e "$HOME/.stow-global-ignore" ]; then
     echo "  󰄬 Linked .stow-global-ignore → \$HOME"
 fi
 
-STOW_FOLDERS="xremap scripts"
+STOW_FOLDERS="xremap scripts agents"
 
 for folder in $STOW_FOLDERS; do
     if [ -d "$folder" ]; then

@@ -11,6 +11,7 @@ This is a **dotfiles repository** that uses **GNU Stow** to manage configuration
 ### Stow-Based Structure
 
 Each tool has its own top-level folder (e.g., `cursor/`, `zsh/`, `starship/`). Inside each folder, config files are placed **as if they were in the home directory**. When stowed:
+
 - `tool-name/.config/app/config.json` becomes `~/.config/app/config.json`
 - `tool-name/.zshrc` becomes `~/.zshrc`
 
@@ -19,6 +20,7 @@ Each tool has its own top-level folder (e.g., `cursor/`, `zsh/`, `starship/`). I
 ### Install Scripts Location
 
 **All install scripts belong in `scripts/.local/bin/`**. These handle installation, setup, and maintenance tasks. Scripts must:
+
 - Find dotfiles root relative to their location: `$(cd "$(dirname "$0")/../../../" && pwd)`
 - Use `set -e` for error handling
 - Be executable (`chmod +x`)
@@ -26,6 +28,7 @@ Each tool has its own top-level folder (e.g., `cursor/`, `zsh/`, `starship/`). I
 ## Key Commands
 
 ### Stow Operations
+
 ```bash
 # From repository root
 stow folder-name          # Create symlinks for a folder
@@ -33,6 +36,7 @@ stow -D folder-name       # Remove symlinks (destow)
 ```
 
 ### Setup and Installation
+
 ```bash
 # Run master setup script
 ./scripts/.local/bin/setup
@@ -47,12 +51,16 @@ stow -D folder-name       # Remove symlinks (destow)
 ```
 
 ### Platform-Specific Notes
+
 - **Linux**: Use `yay` over `pacman` or other package managers whenever possible
 - **macOS**: Platform-specific configs go in separate folders (e.g., `cursor-macos/`)
 
 ## Tool Configurations
 
 ### Current Tools
+
+- **agents/**: Shared agent skills for Claude Code and Codex (see below)
+- **claude/**: Claude Code settings and commands (skills live in `agents/`)
 - **cursor/**: Cursor IDE (shared configs)
   - `.config/Cursor/User/settings.json`
   - `.config/Cursor/User/keybindings.json`
@@ -63,6 +71,26 @@ stow -D folder-name       # Remove symlinks (destow)
 - **scripts/**: All install and maintenance scripts in `.local/bin/`
 - **starship/**: Starship prompt configuration
 - **zsh/**: Zsh shell configuration
+
+### Shared Agent Skills (`agents/`)
+
+Claude Code (`~/.claude/skills/`) and Codex (`~/.codex/skills/`) both use the
+same `SKILL.md` format. To avoid duplicating skills, the canonical source lives
+in **one place** and is exposed to both agents via stow + an internal symlink:
+
+```
+agents/
+  .claude/skills/<name>/SKILL.md     ← canonical: edit here
+  .codex/skills/<name> → ../../.claude/skills/<name>   (relative symlink)
+```
+
+Stowing `agents` produces:
+- `~/.claude/skills` → `dotfiles/agents/.claude/skills` (folded)
+- `~/.codex/skills/<name>` → individual symlinks (preserves Codex's `.system/`)
+
+**Adding a new skill**: create `agents/.claude/skills/<name>/SKILL.md`, then
+run `agents-sync-codex-skills` to refresh the Codex symlinks (adds missing
+ones, removes dangling ones).
 
 ## Adding a New Tool
 
@@ -82,15 +110,75 @@ stow -D folder-name       # Remove symlinks (destow)
 ## Critical Patterns
 
 ### Script Path Resolution
+
 Scripts in `scripts/.local/bin/` are 3 levels deep from the root. Standard pattern:
+
 ```bash
 DOTFILES_DIR=$(cd "$(dirname "$0")/../../../" && pwd)
 ```
 
 ### Stow Behavior
+
 - Stow creates **symlinks**, so edits in the repo immediately affect actual configs
 - Test stow operations before committing changes
 - Use `stow -D` to remove symlinks before re-stowing
 
 ### Extension Management
+
 The `cursor-sync-extensions` script enforces the `extensions.txt` list as the single source of truth—it installs missing extensions AND uninstalls extensions not in the list.
+
+## Behavioral Guidelines
+
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+
+Tradeoff: These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+1. Think Before Coding
+   Don't assume. Don't hide confusion. Surface tradeoffs.
+
+Before implementing:
+
+State your assumptions explicitly. If uncertain, ask.
+If multiple interpretations exist, present them - don't pick silently.
+If a simpler approach exists, say so. Push back when warranted.
+If something is unclear, stop. Name what's confusing. Ask. 2. Simplicity First
+Minimum code that solves the problem. Nothing speculative.
+
+No features beyond what was asked.
+No abstractions for single-use code.
+No "flexibility" or "configurability" that wasn't requested.
+No error handling for impossible scenarios.
+If you write 200 lines and it could be 50, rewrite it.
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+3. Surgical Changes
+   Touch only what you must. Clean up only your own mess.
+
+When editing existing code:
+
+Don't "improve" adjacent code, comments, or formatting.
+Don't refactor things that aren't broken.
+Match existing style, even if you'd do it differently.
+If you notice unrelated dead code, mention it - don't delete it.
+When your changes create orphans:
+
+Remove imports/variables/functions that YOUR changes made unused.
+Don't remove pre-existing dead code unless asked.
+The test: Every changed line should trace directly to the user's request.
+
+4. Goal-Driven Execution
+   Define success criteria. Loop until verified.
+
+Transform tasks into verifiable goals:
+
+"Add validation" → "Write tests for invalid inputs, then make them pass"
+"Fix the bug" → "Write a test that reproduces it, then make it pass"
+"Refactor X" → "Ensure tests pass before and after"
+For multi-step tasks, state a brief plan:
+
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+   Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+These guidelines are working if: fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
