@@ -74,7 +74,7 @@ stow -D folder-name       # Remove symlinks (destow)
 
 ## Important Files
 
-- `.stow-global-ignore`: Controls what files stow ignores (e.g., `.DS_Store`)
+- `.stow-global-ignore`: Controls what files stow ignores (e.g., `.DS_Store`). Stow only reads this from `$HOME`, so the setup script symlinks the repo's copy to `~/.stow-global-ignore` on first run. If stow conflicts on macOS junk files, check that this symlink exists.
 - `.cursorrules` and `.cursor/rules/project-overview.mdc`: Contain the same structure and philosophy documented here
 - `cursor-extensions/extensions.txt`: Single source of truth for Cursor extensions
 - `scripts/.local/bin/setup`: Master setup script that runs sub-installers and stows configured folders

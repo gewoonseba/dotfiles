@@ -1,5 +1,5 @@
 ---
-name: qa
+name: frontend-qa
 description: >
   Run QA checks on frontend changes by analyzing the current branch diff, building a testing plan,
   and then validating it in the browser. Use this skill whenever the user mentions "QA", "test the frontend",
@@ -360,7 +360,9 @@ After executing all test cases, write a self-contained HTML report.
         <div class="test-section">
           <div class="test-section-label">URL</div>
           <div class="test-section-content">
-            <a href="{full-url}" target="_blank" rel="noopener"><code>{full-url}</code></a>
+            <a href="{full-url}" target="_blank" rel="noopener"
+              ><code>{full-url}</code></a
+            >
           </div>
         </div>
         <div class="test-section">
@@ -424,9 +426,10 @@ After executing all test cases, write a self-contained HTML report.
 - Section labels are uppercase, letter-spaced, muted — never restyle them.
 - Screenshots go in the `.screenshots` grid; do not stack them in a single column.
 
-**Screenshot captions — required, one per screenshot.** A caption is a short *explainer*, not a label. The reader should be able to glance at the image + caption and instantly understand what they're seeing without reading the surrounding test prose. Aim for 8–20 words.
+**Screenshot captions — required, one per screenshot.** A caption is a short _explainer_, not a label. The reader should be able to glance at the image + caption and instantly understand what they're seeing without reading the surrounding test prose. Aim for 8–20 words.
 
 A good caption answers at least two of:
+
 - What state is shown? (e.g. "debugger toggle ON", "empty state", "after submit")
 - What page or component? (e.g. "/settings/profile, Super Admin Settings card")
 - What's notable in this frame? (e.g. "Bug icon and orange Switch present", "Subscription Debugger row absent")
@@ -434,6 +437,7 @@ A good caption answers at least two of:
 Do NOT write captions that just restate the test ID, the test title, or the file name — those add nothing. Bad: "TC-01 screenshot 1". Good: "Admin dropdown open — orange `Subscription debugger` row with Bug icon visible above Log out."
 
 Use inline `<code>` inside captions for literal labels, URLs, or key names — same as in `Findings`.
+
 - Keep each `Findings` block to 1–4 sentences. If there's deeper detail, put it in a follow-up paragraph inside the same `test-section-content` rather than a new section.
 
 **Do not deviate from the layout.** No collapsibles (`<details>`/`<summary>`), no tabs, no extra columns, no theming swaps. The format is intentionally narrow and stable so reports compare cleanly across branches.

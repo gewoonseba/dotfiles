@@ -18,6 +18,7 @@ Review an implementation plan as a principal software engineer before code is wr
 Find and review a plan from `.claude/plans/` matching the fuzzy name.
 
 Examples:
+
 - `/review-plan steering` → reviews `steering-kpi-improvements.md`
 - `/review-plan redis` → reviews `azure-managed-redis-migration.md`
 
@@ -38,6 +39,7 @@ Be direct. If something smells wrong, say so.
 ## Review Checklist (from CLAUDE.md)
 
 ### 1. Assumptions & Clarity
+
 > "Don't assume. Don't hide confusion. Surface tradeoffs."
 
 - Are assumptions stated explicitly?
@@ -46,9 +48,11 @@ Be direct. If something smells wrong, say so.
 - Is anything unclear that should block implementation?
 
 ### 2. Simplicity First
+
 > "Minimum code that solves the problem. Nothing speculative."
 
 Challenge the plan if it includes:
+
 - Features beyond what was asked
 - Abstractions for single-use code
 - "Flexibility" or "configurability" that wasn't requested
@@ -57,23 +61,28 @@ Challenge the plan if it includes:
 Ask: **"Would a senior engineer say this is overcomplicated?"**
 
 ### 3. Surgical Changes
+
 > "Touch only what you must. Clean up only your own mess."
 
 Flag if the plan:
+
 - "Improves" adjacent code that isn't broken
 - Refactors things that weren't requested
 - Deviates from existing patterns without justification
 - Has changes that don't trace directly to the original request
 
 ### 4. Verifiable Goals
+
 > "Define success criteria. Loop until verified."
 
 Check that the plan has:
+
 - Clear success criteria (not vague "make it work")
 - Verification steps for each phase
 - A way to know when it's done
 
 Good structure looks like:
+
 ```
 1. [Step] → verify: [check]
 2. [Step] → verify: [check]
