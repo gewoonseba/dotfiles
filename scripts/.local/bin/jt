@@ -14,7 +14,7 @@ export UV_PYTHON_PREFERENCE=system
 
 hint_worktree() {
     echo ""
-    echo "Hint: make sure you're in a Jolteon worktree (see 'jt list')."
+    echo "Hint: make sure you're in a Jolteon worktree (see 'jt worktree list')."
 }
 
 trap 'hint_worktree' ERR
@@ -97,15 +97,52 @@ post_create_worktree() {
     esac
 }
 
-# ─── Commands ──────────────────────────────────────────────
+# Parse --lcl/--dev/--prd flags into $ENV_CHOICE. Unknown args go to $REMAINING_ARGS.
+parse_env_flag() {
+    ENV_CHOICE=""
+    REMAINING_ARGS=()
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --lcl) ENV_CHOICE="lcl"; shift ;;
+            --dev) ENV_CHOICE="dev"; shift ;;
+            --prd) ENV_CHOICE="prd"; shift ;;
+            *)     REMAINING_ARGS+=("$1"); shift ;;
+        esac
+    done
+}
 
-cmd_new() {
-    local branch="$1"
+prompt_env() {
+    local default="$1"
+    local default_num
+    case "$default" in
+        lcl) default_num=1 ;;
+        dev) default_num=2 ;;
+        prd) default_num=3 ;;
+    esac
+    echo "Select environment:" >&2
+    echo "  1) lcl" >&2
+    echo "  2) dev" >&2
+    echo "  3) prd" >&2
+    local choice
+    read -rp "Environment [$default_num]: " choice
+    case "${choice:-$default_num}" in
+        1|lcl) echo "lcl" ;;
+        2|dev) echo "dev" ;;
+        3|prd) echo "prd" ;;
+        *)     echo "Invalid choice" >&2; exit 1 ;;
+    esac
+}
+
+# ─── Worktree commands ─────────────────────────────────────
+
+cmd_worktree_create() {
+    local branch="${1:-}"
+    [ -z "$branch" ] && { echo "Usage: jt worktree create <branch>"; exit 1; }
     local worktree_dir="$WORKSPACE/$branch"
 
     if [ -d "$worktree_dir" ]; then
         echo "Error: directory already exists: $worktree_dir"
-        echo "Use 'jt open $branch' to cd into it, or 'jt edit $branch' to open in Zed."
+        echo "Use 'jt worktree open $branch' to cd into it, or 'jt worktree edit $branch' to open in Zed."
         exit 1
     fi
 
@@ -118,13 +155,14 @@ cmd_new() {
     post_create_worktree "$worktree_dir"
 }
 
-cmd_checkout() {
-    local branch="$1"
+cmd_worktree_checkout() {
+    local branch="${1:-}"
+    [ -z "$branch" ] && { echo "Usage: jt worktree checkout <branch>"; exit 1; }
     local worktree_dir="$WORKSPACE/$branch"
 
     if [ -d "$worktree_dir" ]; then
         echo "Error: directory already exists: $worktree_dir"
-        echo "Use 'jt open $branch' to cd into it, or 'jt edit $branch' to open in Zed."
+        echo "Use 'jt worktree open $branch' to cd into it, or 'jt worktree edit $branch' to open in Zed."
         exit 1
     fi
 
@@ -133,7 +171,7 @@ cmd_checkout() {
 
     if ! git -C "$REPO" rev-parse "origin/$branch" >/dev/null 2>&1; then
         echo "Error: remote branch 'origin/$branch' not found."
-        echo "Use 'jt new $branch' to create a new branch instead."
+        echo "Use 'jt worktree create $branch' to create a new branch instead."
         exit 1
     fi
 
@@ -145,21 +183,27 @@ cmd_checkout() {
     post_create_worktree "$worktree_dir"
 }
 
-cmd_open() {
-    local branch="$1"
+cmd_worktree_open() {
+    local branch="${1:-}"
+    [ -z "$branch" ] && { echo "Usage: jt worktree open <branch>"; exit 1; }
     local worktree_dir="$WORKSPACE/$branch"
 
     if [ ! -d "$worktree_dir" ]; then
         echo "Error: no worktree at $worktree_dir"
-        echo "Use 'jt list' to see available worktrees, or 'jt new $branch' to create one."
+        echo "Use 'jt worktree list' to see available worktrees, or 'jt worktree create $branch' to create one."
         exit 1
+    fi
+
+    if [ -n "${JT_CD_FILE:-}" ]; then
+        printf '%s\n' "$worktree_dir" > "$JT_CD_FILE"
+        exit 0
     fi
 
     cd "$worktree_dir"
     exec "$SHELL"
 }
 
-cmd_list() {
+cmd_worktree_list() {
     printf "%-40s %s\n" "BRANCH" "PATH"
     printf '─%.0s' $(seq 1 80)
     echo
@@ -170,8 +214,9 @@ cmd_list() {
     }'
 }
 
-cmd_remove() {
-    local branch="$1"
+cmd_worktree_remove() {
+    local branch="${1:-}"
+    [ -z "$branch" ] && { echo "Usage: jt worktree remove <branch>"; exit 1; }
     local worktree_dir="$WORKSPACE/$branch"
 
     if [ ! -d "$worktree_dir" ]; then
@@ -187,7 +232,7 @@ cmd_remove() {
     fi
 }
 
-cmd_setup() {
+cmd_worktree_setup() {
     local dir="${1:-$(pwd)}"
 
     if [ ! -d "$dir" ]; then
@@ -206,7 +251,7 @@ cmd_setup() {
     echo "  $dir"
 }
 
-cmd_edit() {
+cmd_worktree_edit() {
     local branch="${1:-}"
     local dir
 
@@ -226,33 +271,29 @@ cmd_edit() {
     "$zed_cmd" "$dir"
 }
 
-cmd_serve() {
+# ─── App commands ──────────────────────────────────────────
 
-    local env="${1:-}"
+cmd_app_run() {
+    parse_env_flag "$@"
+    local env="$ENV_CHOICE"
+    if [ ${#REMAINING_ARGS[@]} -gt 0 ]; then
+        echo "Unknown argument: ${REMAINING_ARGS[0]}"
+        echo "Usage: jt app run [--lcl|--dev|--prd]"
+        exit 1
+    fi
 
     if [ -z "$env" ]; then
-        echo "Select environment:"
-        echo "  1) lcl"
-        echo "  2) dev"
-        echo "  3) prd"
-        read -rp "Environment [1]: " choice
-        case "${choice:-1}" in
-            1|lcl) env="lcl" ;;
-            2|dev) env="dev" ;;
-            3|prd) env="prd" ;;
-            *)     echo "Invalid choice"; exit 1 ;;
-        esac
+        env="$(prompt_env lcl)"
     fi
 
     # Stop any running services first
-    cmd_stop 2>/dev/null || true
+    cmd_app_stop 2>/dev/null || true
 
     local env_file="$HOME/.config/jt/environments.sh"
     if [ ! -f "$env_file" ]; then
         echo "Error: missing $env_file"
         echo ""
         echo "Create it with env_lcl(), env_dev(), env_prd() shell functions."
-        echo "See: jt help serve"
         exit 1
     fi
     # shellcheck source=/dev/null
@@ -262,11 +303,6 @@ cmd_serve() {
         lcl) env_lcl ;;
         dev) env_dev ;;
         prd) env_prd ;;
-        *)
-            echo "Unknown environment: $env"
-            echo "Valid options: lcl, dev, prd"
-            exit 1
-            ;;
     esac
 
     echo ""
@@ -292,69 +328,45 @@ cmd_serve() {
     wait
 }
 
-cmd_generate() {
+cmd_app_stop() {
+    local killed=0
 
-
-    local javm_bin
-    javm_bin="$(command -v javm 2>/dev/null || echo "$HOME/.local/bin/javm")"
-    if [ ! -x "$javm_bin" ]; then
-        echo "Error: javm is not installed."
-        echo ""
-        echo "javm is required to manage Java versions for the OpenAPI generator."
-        echo "Install it first, then re-run 'jt generate'."
-        exit 1
+    local pids
+    pids=$(lsof -ti :8000 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+        echo "$pids" | xargs kill -9 2>/dev/null || true
+        echo "Stopped backend (port 8000)"
+        killed=1
     fi
 
-    if ! curl -sf http://localhost:8000/docs >/dev/null 2>&1; then
-        echo "Dashboard API is not running on localhost:8000."
-        read -rp "Start it with 'jt serve'? [Y/n] " confirm
-        if [[ "${confirm:-y}" =~ ^[Nn]$ ]]; then
-            echo "Aborted. Start the API first, then re-run 'jt generate'."
-            exit 1
-        fi
-        cmd_serve
-        # serve blocks (wait), so we won't reach here
+    pids=$(lsof -ti :5173 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+        echo "$pids" | xargs kill -9 2>/dev/null || true
+        echo "Stopped frontend (port 5173)"
+        killed=1
     fi
 
-    local sdk_dir
-    sdk_dir="$(cd packages/dashboard-api-ts-sdk 2>/dev/null && pwd)" || sdk_dir="$REPO/packages/dashboard-api-ts-sdk"
-
-    # javm modifies JAVA_HOME/PATH via a shell function (fd3 protocol) that is
-    # only available in interactive zsh. Replicate the protocol directly so the
-    # env vars are exported for npm run build.
-    local fd3
-    fd3=$(mktemp)
-    "$javm_bin" --fd3 "$fd3" use 25
-    if [ -s "$fd3" ]; then
-        while IFS=$'\t' read -r op key val; do
-            [ "$op" = "SET" ] && export "$key=$val"
-            [ "$op" = "UNSET" ] && unset "$key"
-        done < "$fd3"
+    if [ "$killed" -eq 0 ]; then
+        echo "No services running."
     fi
-    rm -f "$fd3"
-
-    echo "Generating SDK..."
-    (cd "$sdk_dir" && npm run build)
-    echo "Done."
 }
 
-cmd_mcp() {
+# ─── MCP commands ──────────────────────────────────────────
 
-    local env="${1:-}"
-    local port="${2:-8002}"
+cmd_mcp_run() {
+    local env="" port="8002"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --lcl)  env="lcl"; shift ;;
+            --dev)  env="dev"; shift ;;
+            --prd)  env="prd"; shift ;;
+            --port) port="${2:-}"; [ -z "$port" ] && { echo "--port needs a value"; exit 1; }; shift 2 ;;
+            *)      echo "Unknown argument: $1"; echo "Usage: jt mcp run [--lcl|--dev|--prd] [--port N]"; exit 1 ;;
+        esac
+    done
 
     if [ -z "$env" ]; then
-        echo "Select environment:"
-        echo "  1) lcl  — local dashboard-api on localhost:8000"
-        echo "  2) dev  — https://dashboard-api.dev.companion.energy"
-        echo "  3) prd  — https://dashboard-api.prd.companion.energy"
-        read -rp "Environment [2]: " choice
-        case "${choice:-2}" in
-            1|lcl) env="lcl" ;;
-            2|dev) env="dev" ;;
-            3|prd) env="prd" ;;
-            *)     echo "Invalid choice"; exit 1 ;;
-        esac
+        env="$(prompt_env dev)"
     fi
 
     local mcp_dir
@@ -385,7 +397,7 @@ cmd_mcp() {
             PYTHONPATH=. uv run python ../mcp-service/scripts/generate_openapi_spec.py)
     fi
 
-    # Stop any existing MCP server
+    # Stop any existing MCP server on this port
     local mcp_pids
     mcp_pids=$(lsof -ti :"$port" 2>/dev/null || true)
     if [ -n "$mcp_pids" ]; then
@@ -441,45 +453,34 @@ cmd_mcp() {
     wait
 }
 
-cmd_stop() {
-    local killed=0
+cmd_mcp_stop() {
+    local port="8002"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --port) port="${2:-}"; [ -z "$port" ] && { echo "--port needs a value"; exit 1; }; shift 2 ;;
+            *)      echo "Unknown argument: $1"; echo "Usage: jt mcp stop [--port N]"; exit 1 ;;
+        esac
+    done
 
     local pids
-    pids=$(lsof -ti :8000 2>/dev/null || true)
+    pids=$(lsof -ti :"$port" 2>/dev/null || true)
     if [ -n "$pids" ]; then
         echo "$pids" | xargs kill -9 2>/dev/null || true
-        echo "Stopped backend (port 8000)"
-        killed=1
-    fi
-
-    pids=$(lsof -ti :5173 2>/dev/null || true)
-    if [ -n "$pids" ]; then
-        echo "$pids" | xargs kill -9 2>/dev/null || true
-        echo "Stopped frontend (port 5173)"
-        killed=1
-    fi
-
-    if [ "$killed" -eq 0 ]; then
-        echo "No services running."
+        echo "Stopped MCP service (port $port)"
+    else
+        echo "No MCP service running on port $port."
     fi
 }
 
-cmd_browse() {
+# ─── Browser commands ──────────────────────────────────────
+
+cmd_browser_open() {
     local profile="${1:-}"
     local url="${2:-http://localhost:5173}"
     local profiles_dir="$HOME/Work/browser-profiles"
 
-    if [ "$profile" = "stop" ]; then
-        if pkill -f 'agent-browser' 2>/dev/null; then
-            echo "Stopped agent-browser"
-        else
-            echo "No agent-browser running."
-        fi
-        return
-    fi
-
     if [ -z "$profile" ]; then
-        echo "Usage: jt browse <profile> [url]"
+        echo "Usage: jt browser open <profile> [url]"
         echo ""
         echo "Profiles:"
         for p in "$profiles_dir"/*/; do
@@ -502,66 +503,172 @@ cmd_browse() {
     agent-browser --profile "$profiles_dir/$profile" --headed open "$url"
 }
 
+cmd_browser_stop() {
+    if pkill -f 'agent-browser' 2>/dev/null; then
+        echo "Stopped agent-browser"
+    else
+        echo "No agent-browser running."
+    fi
+}
+
+# ─── SDK commands ──────────────────────────────────────────
+
+cmd_sdk_generate() {
+    local javm_bin
+    javm_bin="$(command -v javm 2>/dev/null || echo "$HOME/.local/bin/javm")"
+    if [ ! -x "$javm_bin" ]; then
+        echo "Error: javm is not installed."
+        echo ""
+        echo "javm is required to manage Java versions for the OpenAPI generator."
+        echo "Install it first, then re-run 'jt sdk generate'."
+        exit 1
+    fi
+
+    if ! curl -sf http://localhost:8000/docs >/dev/null 2>&1; then
+        echo "Dashboard API is not running on localhost:8000."
+        read -rp "Start it with 'jt app run'? [Y/n] " confirm
+        if [[ "${confirm:-y}" =~ ^[Nn]$ ]]; then
+            echo "Aborted. Start the API first, then re-run 'jt sdk generate'."
+            exit 1
+        fi
+        cmd_app_run
+        # app run blocks (wait), so we won't reach here
+    fi
+
+    local sdk_dir
+    sdk_dir="$(cd packages/dashboard-api-ts-sdk 2>/dev/null && pwd)" || sdk_dir="$REPO/packages/dashboard-api-ts-sdk"
+
+    # javm modifies JAVA_HOME/PATH via a shell function (fd3 protocol) that is
+    # only available in interactive zsh. Replicate the protocol directly so the
+    # env vars are exported for npm run build.
+    local fd3
+    fd3=$(mktemp)
+    "$javm_bin" --fd3 "$fd3" use 25
+    if [ -s "$fd3" ]; then
+        while IFS=$'\t' read -r op key val; do
+            [ "$op" = "SET" ] && export "$key=$val"
+            [ "$op" = "UNSET" ] && unset "$key"
+        done < "$fd3"
+    fi
+    rm -f "$fd3"
+
+    echo "Generating SDK..."
+    (cd "$sdk_dir" && npm run build)
+    echo "Done."
+}
+
+# ─── Help ──────────────────────────────────────────────────
+
 cmd_help() {
     cat <<'HELP'
 jt — Jolteon worktree & service manager
 
 Usage:
-  jt <command> [arguments]
+  jt <noun> <verb> [options]
 
-Worktree commands:
-  jt new <branch>              Create a new worktree and branch
-  jt checkout <branch>         Create a worktree from an existing remote branch
-  jt setup [branch|path]       Copy env files + install deps (default: cwd)
-  jt open <branch>             Open a shell in an existing worktree
-  jt edit [branch]             Open worktree in Zed (default: current dir)
-  jt list                      List all worktrees
-  jt remove <branch>           Remove a worktree and its branch
+Worktree (alias: wt):
+  jt worktree create <branch>          Create a new worktree and branch
+  jt worktree checkout <branch>        Create a worktree from an existing remote branch
+  jt worktree list                     List all worktrees
+  jt worktree open <branch>            cd into an existing worktree
+  jt worktree edit [branch]            Open worktree in Zed (default: cwd)
+  jt worktree setup [branch|path]      Copy env files + install deps (default: cwd)
+  jt worktree remove <branch>          Remove a worktree and its branch
 
-Service commands:
-  jt serve [lcl|dev|prd]       Start backend + frontend (default: lcl)
-  jt mcp [lcl|dev|prd] [port]  Start MCP service (default: dev, port 8002)
-  jt stop                      Stop all services
+App (backend + frontend):
+  jt app run [--lcl|--dev|--prd]       Start backend + frontend (default: lcl)
+  jt app stop                          Stop backend + frontend
 
-Browser commands:
-  jt browse <profile> [url]    Open headed browser (default: localhost:5173)
-  jt browse stop               Stop agent-browser
+MCP:
+  jt mcp run [--lcl|--dev|--prd] [--port N]   Start MCP service (default: --dev, port 8002)
+  jt mcp stop [--port N]               Stop MCP service (default: port 8002)
 
-SDK commands:
-  jt generate                   Generate the dashboard API TypeScript SDK
+Browser:
+  jt browser open <profile> [url]      Open headed browser (default: localhost:5173)
+  jt browser stop                      Stop agent-browser
+
+SDK:
+  jt sdk generate                      Generate the dashboard API TypeScript SDK
 
 Other:
-  jt help                      Show this help
+  jt help                              Show this help
 
 Examples:
-  jt new feat/battery-charts
-  jt checkout feat/partner-portal-v1
-  jt open feat/battery-charts
-  jt edit feat/battery-charts
-  jt serve prd
-  jt mcp dev
-  jt mcp prd 9000
-  jt browse customer
-  jt browse root http://localhost:5173/admin
-  jt remove feat/battery-charts
+  jt worktree create feat/battery-charts
+  jt worktree checkout feat/partner-portal-v1
+  jt wt open feat/battery-charts
+  jt app run --prd
+  jt mcp run --dev
+  jt mcp run --prd --port 9000
+  jt browser open customer
+  jt browser open root http://localhost:5173/admin
 HELP
 }
 
 # ─── Main ──────────────────────────────────────────────────
 
-case "${1:-help}" in
-    new)    shift; cmd_new "$1" ;;
-    checkout|co) shift; cmd_checkout "$1" ;;
-    setup)  shift; cmd_setup "${1:-}" ;;
-    open)   shift; cmd_open "$1" ;;
-    edit)   shift; cmd_edit "${1:-}" ;;
-    list|ls) cmd_list ;;
-    remove|rm) shift; cmd_remove "$1" ;;
-    serve)  shift; cmd_serve "${1:-}" ;;
-    mcp)    shift; cmd_mcp "${1:-}" "${2:-8002}" ;;
-    stop)   cmd_stop ;;
-    browse) shift; cmd_browse "${1:-}" "${2:-}" ;;
-    generate|gen) cmd_generate ;;
+dispatch_worktree() {
+    local verb="${1:-list}"
+    shift 2>/dev/null || true
+    case "$verb" in
+        create)      cmd_worktree_create "${1:-}" ;;
+        checkout|co) cmd_worktree_checkout "${1:-}" ;;
+        list|ls)     cmd_worktree_list ;;
+        open)        cmd_worktree_open "${1:-}" ;;
+        edit)        cmd_worktree_edit "${1:-}" ;;
+        setup)       cmd_worktree_setup "${1:-}" ;;
+        remove|rm)   cmd_worktree_remove "${1:-}" ;;
+        *)           echo "Unknown worktree verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
+    esac
+}
+
+dispatch_app() {
+    local verb="${1:-}"
+    shift 2>/dev/null || true
+    case "$verb" in
+        run)  cmd_app_run "$@" ;;
+        stop) cmd_app_stop ;;
+        *)    echo "Unknown app verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
+    esac
+}
+
+dispatch_mcp() {
+    local verb="${1:-}"
+    shift 2>/dev/null || true
+    case "$verb" in
+        run)  cmd_mcp_run "$@" ;;
+        stop) cmd_mcp_stop "$@" ;;
+        *)    echo "Unknown mcp verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
+    esac
+}
+
+dispatch_browser() {
+    local verb="${1:-}"
+    shift 2>/dev/null || true
+    case "$verb" in
+        open) cmd_browser_open "${1:-}" "${2:-}" ;;
+        stop) cmd_browser_stop ;;
+        *)    echo "Unknown browser verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
+    esac
+}
+
+dispatch_sdk() {
+    local verb="${1:-}"
+    shift 2>/dev/null || true
+    case "$verb" in
+        generate|gen) cmd_sdk_generate ;;
+        *)            echo "Unknown sdk verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
+    esac
+}
+
+noun="${1:-help}"
+shift 2>/dev/null || true
+case "$noun" in
+    worktree|wt)    dispatch_worktree "$@" ;;
+    app)            dispatch_app "$@" ;;
+    mcp)            dispatch_mcp "$@" ;;
+    browser)        dispatch_browser "$@" ;;
+    sdk)            dispatch_sdk "$@" ;;
     help|-h|--help) cmd_help ;;
-    *)      echo "Unknown command: $1"; echo "Run 'jt help' for usage."; exit 1 ;;
+    *)              echo "Unknown command: $noun"; echo "Run 'jt help' for usage."; exit 1 ;;
 esac
