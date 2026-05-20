@@ -71,6 +71,10 @@ source "${ZINIT_HOME}/zinit.zsh"
 zinit light zsh-users/zsh-syntax-highlighting
 zinit light zsh-users/zsh-autosuggestions
 zinit light zsh-users/zsh-completions
+
+# Custom completion functions (e.g. jt)
+fpath=($HOME/.zsh/completions $fpath)
+
 autoload -U compinit && compinit
 
 # Setup Starship and zoxide

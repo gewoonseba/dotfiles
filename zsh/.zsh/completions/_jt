@@ -1,0 +1,221 @@
+#compdef jt
+
+# Zsh completion for jt — Jolteon worktree & service manager.
+
+_jt() {
+    local context state state_descr line
+    typeset -A opt_args
+
+    _arguments -C \
+        '1: :_jt_nouns' \
+        '*::arg:->args'
+
+    case $state in
+        args)
+            case $line[1] in
+                worktree|wt) _jt_worktree ;;
+                app)         _jt_app ;;
+                mcp)         _jt_mcp ;;
+                browser)     _jt_browser ;;
+                sdk)         _jt_sdk ;;
+                setup)       _jt_branches_or_path ;;
+            esac
+            ;;
+    esac
+}
+
+_jt_nouns() {
+    local -a nouns
+    nouns=(
+        'worktree:manage git worktrees'
+        'wt:alias for worktree'
+        'app:backend + frontend services'
+        'mcp:MCP service'
+        'browser:agent browser'
+        'sdk:SDK generation'
+        'setup:run setup in current dir (alias for worktree setup)'
+        'help:show help'
+    )
+    _describe 'noun' nouns
+}
+
+_jt_worktree() {
+    local context state state_descr line
+    typeset -A opt_args
+
+    _arguments -C \
+        '1: :_jt_worktree_verbs' \
+        '*::arg:->arg'
+
+    case $state in
+        arg)
+            case $line[1] in
+                create)
+                    # New branch name — no completion (user types fresh name).
+                    ;;
+                checkout|co)
+                    _jt_remote_branches
+                    ;;
+                open|edit|remove|rm|nuke|setup)
+                    _jt_local_branches
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_jt_worktree_verbs() {
+    local -a verbs
+    verbs=(
+        'create:create new worktree + branch'
+        'checkout:create worktree from existing remote branch'
+        'list:list all worktrees'
+        'ls:alias for list'
+        'open:cd into a worktree (picker if no branch)'
+        'edit:open worktree in Zed'
+        'setup:copy env files + install deps'
+        'remove:remove one worktree + local branch'
+        'rm:alias for remove'
+        'cleanup:bulk remove merged/orphaned worktrees'
+        'nuke:force-remove worktree + delete local AND remote branch'
+    )
+    _describe 'verb' verbs
+}
+
+_jt_app() {
+    local context state state_descr line
+    typeset -A opt_args
+
+    _arguments -C \
+        '1: :_jt_app_verbs' \
+        '*::flag:->flag'
+
+    case $state in
+        flag)
+            if [[ $line[1] == run ]]; then
+                _values 'env' \
+                    '--lcl[local environment]' \
+                    '--dev[dev environment]' \
+                    '--prd[prod environment]'
+            fi
+            ;;
+    esac
+}
+
+_jt_app_verbs() {
+    local -a verbs
+    verbs=(
+        'run:start backend + frontend'
+        'stop:stop backend + frontend'
+    )
+    _describe 'verb' verbs
+}
+
+_jt_mcp() {
+    local context state state_descr line
+    typeset -A opt_args
+
+    _arguments -C \
+        '1: :_jt_mcp_verbs' \
+        '*::flag:->flag'
+
+    case $state in
+        flag)
+            case $line[1] in
+                run)
+                    _values 'flag' \
+                        '--lcl[local dashboard-api]' \
+                        '--dev[dev dashboard-api]' \
+                        '--prd[prd dashboard-api]' \
+                        '--port[port number]:port number:'
+                    ;;
+                stop)
+                    _values 'flag' '--port[port number]:port number:'
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_jt_mcp_verbs() {
+    local -a verbs
+    verbs=(
+        'run:start MCP service'
+        'stop:stop MCP service'
+    )
+    _describe 'verb' verbs
+}
+
+_jt_browser() {
+    local context state state_descr line
+    typeset -A opt_args
+
+    _arguments -C \
+        '1: :_jt_browser_verbs' \
+        '*::arg:->arg'
+
+    case $state in
+        arg)
+            if [[ $line[1] == open ]]; then
+                if (( CURRENT == 2 )); then
+                    _jt_browser_profiles
+                else
+                    _message 'url (default: http://localhost:5173)'
+                fi
+            fi
+            ;;
+    esac
+}
+
+_jt_browser_verbs() {
+    local -a verbs
+    verbs=(
+        'open:open headed browser with profile'
+        'stop:stop agent-browser'
+    )
+    _describe 'verb' verbs
+}
+
+_jt_sdk() {
+    local -a verbs
+    verbs=(
+        'generate:generate dashboard API TypeScript SDK'
+        'gen:alias for generate'
+    )
+    _describe 'verb' verbs
+}
+
+# ─── Dynamic completers ────────────────────────────────────
+
+_jt_local_branches() {
+    local repo="$HOME/Work/jolteon"
+    local -a branches
+    branches=(${(f)"$(git -C $repo worktree list --porcelain 2>/dev/null \
+        | awk '/^branch / { sub("refs/heads/", "", $2); print $2 }')"})
+    _describe 'branch' branches
+}
+
+_jt_remote_branches() {
+    local repo="$HOME/Work/jolteon"
+    local -a branches
+    branches=(${(f)"$(git -C $repo for-each-ref --format='%(refname:short)' refs/remotes/origin/ 2>/dev/null \
+        | sed 's|^origin/||' | grep -v '^HEAD$')"})
+    _describe 'remote branch' branches
+}
+
+_jt_browser_profiles() {
+    local dir="$HOME/Work/browser-profiles"
+    local -a profiles
+    if [[ -d $dir ]]; then
+        profiles=($dir/*(/N:t))
+    fi
+    _describe 'profile' profiles
+}
+
+_jt_branches_or_path() {
+    _alternative \
+        'branches:branch:_jt_local_branches' \
+        'paths:path:_files -/'
+}
+
+_jt "$@"

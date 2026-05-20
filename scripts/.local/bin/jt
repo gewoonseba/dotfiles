@@ -185,21 +185,60 @@ cmd_worktree_checkout() {
 
 cmd_worktree_open() {
     local branch="${1:-}"
-    [ -z "$branch" ] && { echo "Usage: jt worktree open <branch>"; exit 1; }
-    local worktree_dir="$WORKSPACE/$branch"
+    local target_dir=""
 
-    if [ ! -d "$worktree_dir" ]; then
-        echo "Error: no worktree at $worktree_dir"
-        echo "Use 'jt worktree list' to see available worktrees, or 'jt worktree create $branch' to create one."
-        exit 1
+    if [ -z "$branch" ]; then
+        # Interactive picker over all worktrees (branch \t dir).
+        local entries
+        entries=$(git -C "$REPO" worktree list --porcelain | awk '
+            /^worktree / { d=substr($0, 10) }
+            /^branch /   { b=$2; sub("refs/heads/", "", b); printf "%s\t%s\n", b, d }
+        ')
+        if [ -z "$entries" ]; then
+            echo "No worktrees found."
+            exit 1
+        fi
+
+        if command -v fzf >/dev/null 2>&1; then
+            local pick
+            pick=$(printf '%s\n' "$entries" | fzf \
+                --prompt="worktree> " \
+                --delimiter=$'\t' \
+                --nth=1 \
+                --height=40% \
+                --reverse) || { echo "Aborted."; exit 0; }
+            target_dir=$(printf '%s' "$pick" | awk -F'\t' '{print $2}')
+        else
+            local -a arr_dirs=()
+            local i=1
+            while IFS=$'\t' read -r b d; do
+                printf "  %2d) %-48s %s\n" "$i" "$b" "$d"
+                arr_dirs+=("$d")
+                i=$((i+1))
+            done <<< "$entries"
+            local choice
+            read -rp "Pick a worktree (1-${#arr_dirs[@]}): " choice
+            if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#arr_dirs[@]} ]; then
+                echo "Invalid choice."
+                exit 1
+            fi
+            target_dir="${arr_dirs[$((choice-1))]}"
+        fi
+    else
+        target_dir="$WORKSPACE/$branch"
+        if [ ! -d "$target_dir" ]; then
+            echo "Error: no worktree at $target_dir"
+            echo "Use 'jt worktree list' to see available worktrees, or 'jt worktree create $branch' to create one."
+            exit 1
+        fi
     fi
 
     if [ -n "${JT_CD_FILE:-}" ]; then
-        printf '%s\n' "$worktree_dir" > "$JT_CD_FILE"
+        printf '%s\n' "$target_dir" > "$JT_CD_FILE"
         exit 0
     fi
 
-    cd "$worktree_dir"
+    cd "$target_dir"
     exec "$SHELL"
 }
 
@@ -230,6 +269,101 @@ cmd_worktree_remove() {
         git -C "$REPO" branch -d "$branch" 2>/dev/null && echo "Deleted branch: $branch" || true
         echo "Removed worktree: $worktree_dir"
     fi
+}
+
+cmd_worktree_cleanup() {
+    echo "Fetching origin --prune..."
+    git -C "$REPO" fetch origin --prune --quiet
+
+    local -a clean_branches=() clean_dirs=() clean_reasons=()
+
+    while IFS=$'\t' read -r dir branch; do
+        [ -z "$branch" ] && continue
+        [ "$branch" = "main" ] && continue
+        # Safety: only touch worktrees inside $WORKSPACE
+        [[ "$dir" == "$WORKSPACE"/* ]] || continue
+
+        local upstream reason=""
+        upstream=$(git -C "$REPO" for-each-ref --format='%(upstream:short)' "refs/heads/$branch" 2>/dev/null || true)
+        if [ -n "$upstream" ] && ! git -C "$REPO" show-ref --verify --quiet "refs/remotes/$upstream"; then
+            reason="remote branch deleted"
+        elif git -C "$REPO" merge-base --is-ancestor "$branch" origin/main 2>/dev/null; then
+            reason="merged into main"
+        else
+            continue
+        fi
+
+        clean_branches+=("$branch")
+        clean_dirs+=("$dir")
+        clean_reasons+=("$reason")
+    done < <(git -C "$REPO" worktree list --porcelain | awk '
+        /^worktree / { d=substr($0, 10) }
+        /^branch /   { b=$2; sub("refs/heads/", "", b); printf "%s\t%s\n", d, b }
+    ')
+
+    if [ ${#clean_branches[@]} -eq 0 ]; then
+        echo "Nothing to clean up."
+        git -C "$REPO" worktree prune
+        return 0
+    fi
+
+    echo ""
+    echo "Cleanable worktrees (${#clean_branches[@]}):"
+    local i
+    for i in "${!clean_branches[@]}"; do
+        printf "  %-48s  (%s)\n" "${clean_branches[$i]}" "${clean_reasons[$i]}"
+    done
+    echo ""
+    read -rp "Remove all ${#clean_branches[@]}? [y/N] " confirm
+    [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Aborted."; return 0; }
+
+    for i in "${!clean_branches[@]}"; do
+        local b="${clean_branches[$i]}" d="${clean_dirs[$i]}"
+        if git -C "$REPO" worktree remove "$d" 2>/dev/null \
+            || git -C "$REPO" worktree remove --force "$d" 2>/dev/null; then
+            git -C "$REPO" branch -D "$b" >/dev/null 2>&1 || true
+            echo "  removed $b"
+        else
+            echo "  ! failed to remove $b ($d)"
+        fi
+    done
+    git -C "$REPO" worktree prune
+    echo "Done."
+}
+
+cmd_worktree_nuke() {
+    local branch="${1:-}"
+    [ -z "$branch" ] && { echo "Usage: jt worktree nuke <branch>"; exit 1; }
+    local worktree_dir="$WORKSPACE/$branch"
+
+    local has_worktree=0 has_local=0 has_remote=0
+    [ -d "$worktree_dir" ] && has_worktree=1
+    git -C "$REPO" show-ref --verify --quiet "refs/heads/$branch" && has_local=1
+    git -C "$REPO" ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1 && has_remote=1
+
+    if [ "$has_worktree" -eq 0 ] && [ "$has_local" -eq 0 ] && [ "$has_remote" -eq 0 ]; then
+        echo "Nothing to nuke: no worktree, local branch, or remote branch for '$branch'."
+        exit 1
+    fi
+
+    echo "About to NUKE '$branch':"
+    [ "$has_worktree" -eq 1 ] && echo "  - worktree:      $worktree_dir (force, drops uncommitted changes)"
+    [ "$has_local" -eq 1 ]    && echo "  - local branch:  $branch"
+    [ "$has_remote" -eq 1 ]   && echo "  - remote branch: origin/$branch"
+
+    read -rp "Continue? [y/N] " confirm
+    [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
+
+    if [ "$has_worktree" -eq 1 ]; then
+        git -C "$REPO" worktree remove --force "$worktree_dir" && echo "Removed worktree: $worktree_dir"
+    fi
+    if [ "$has_local" -eq 1 ]; then
+        git -C "$REPO" branch -D "$branch" >/dev/null && echo "Deleted local branch: $branch"
+    fi
+    if [ "$has_remote" -eq 1 ]; then
+        git -C "$REPO" push origin --delete "$branch" && echo "Deleted remote branch: origin/$branch"
+    fi
+    git -C "$REPO" worktree prune
 }
 
 cmd_worktree_setup() {
@@ -570,10 +704,14 @@ Worktree (alias: wt):
   jt worktree create <branch>          Create a new worktree and branch
   jt worktree checkout <branch>        Create a worktree from an existing remote branch
   jt worktree list                     List all worktrees
-  jt worktree open <branch>            cd into an existing worktree
+  jt worktree open [branch]            cd into a worktree (interactive picker if no branch)
   jt worktree edit [branch]            Open worktree in Zed (default: cwd)
   jt worktree setup [branch|path]      Copy env files + install deps (default: cwd)
-  jt worktree remove <branch>          Remove a worktree and its branch
+  jt worktree remove <branch>          Remove one worktree + local branch (safe)
+  jt worktree cleanup                  Bulk remove worktrees whose branch is merged
+                                       into main or whose upstream was deleted
+  jt worktree nuke <branch>            Force-remove worktree + delete local AND
+                                       remote branch (destructive)
 
 App (backend + frontend):
   jt app run [--lcl|--dev|--prd]       Start backend + frontend (default: lcl)
@@ -589,6 +727,9 @@ Browser:
 
 SDK:
   jt sdk generate                      Generate the dashboard API TypeScript SDK
+
+Shortcuts:
+  jt setup [branch|path]               Alias for 'jt worktree setup' (default: cwd)
 
 Other:
   jt help                              Show this help
@@ -618,6 +759,8 @@ dispatch_worktree() {
         edit)        cmd_worktree_edit "${1:-}" ;;
         setup)       cmd_worktree_setup "${1:-}" ;;
         remove|rm)   cmd_worktree_remove "${1:-}" ;;
+        cleanup)     cmd_worktree_cleanup ;;
+        nuke)        cmd_worktree_nuke "${1:-}" ;;
         *)           echo "Unknown worktree verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
     esac
 }
@@ -669,6 +812,7 @@ case "$noun" in
     mcp)            dispatch_mcp "$@" ;;
     browser)        dispatch_browser "$@" ;;
     sdk)            dispatch_sdk "$@" ;;
+    setup)          cmd_worktree_setup "${1:-}" ;;
     help|-h|--help) cmd_help ;;
     *)              echo "Unknown command: $noun"; echo "Run 'jt help' for usage."; exit 1 ;;
 esac
