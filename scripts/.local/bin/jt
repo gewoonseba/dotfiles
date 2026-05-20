@@ -53,6 +53,50 @@ setup_worktree() {
     (cd "$target_dir" && uv run pre-commit install)
 }
 
+post_create_worktree() {
+    local worktree_dir="$1"
+    local log_file="$worktree_dir/.jt-setup.log"
+
+    echo ""
+    echo "Running setup in background (log: $log_file)..."
+    (setup_worktree "$worktree_dir" >"$log_file" 2>&1) &
+    disown 2>/dev/null || true
+
+    # Signal the shell wrapper to cd the parent shell into the worktree.
+    if [ -n "${JT_CD_FILE:-}" ]; then
+        printf '%s\n' "$worktree_dir" > "$JT_CD_FILE"
+    fi
+
+    echo ""
+    echo "Worktree ready at: $worktree_dir"
+    echo ""
+    echo "Open an AI agent?"
+    echo "  1) claude"
+    echo "  2) codex"
+    echo "  3) agy"
+    echo "  4) none"
+    read -rp "Choice [4]: " choice
+
+    cd "$worktree_dir"
+    case "${choice:-4}" in
+        1|claude)
+            command -v claude >/dev/null 2>&1 || { echo "claude not found."; exit 0; }
+            exec claude
+            ;;
+        2|codex)
+            command -v codex >/dev/null 2>&1 || { echo "codex not found."; exit 0; }
+            exec codex
+            ;;
+        3|agy)
+            command -v agy >/dev/null 2>&1 || { echo "agy not found."; exit 0; }
+            exec agy
+            ;;
+        *)
+            exit 0
+            ;;
+    esac
+}
+
 # ─── Commands ──────────────────────────────────────────────
 
 cmd_new() {
@@ -71,15 +115,7 @@ cmd_new() {
     git -C "$REPO" worktree add -b "$branch" "$worktree_dir" origin/main
     git -C "$worktree_dir" push -u origin "$branch" --quiet
 
-    setup_worktree "$worktree_dir"
-
-    echo ""
-    echo "Done. Worktree ready at:"
-    echo "  $worktree_dir"
-    echo ""
-    echo "To start working:"
-    echo "  cd $worktree_dir"
-    echo "  jt serve"
+    post_create_worktree "$worktree_dir"
 }
 
 cmd_checkout() {
@@ -106,15 +142,7 @@ cmd_checkout() {
     git -C "$REPO" worktree add "$worktree_dir" "origin/$branch"
     git -C "$worktree_dir" checkout -b "$branch" 2>/dev/null || true
 
-    setup_worktree "$worktree_dir"
-
-    echo ""
-    echo "Done. Worktree ready at:"
-    echo "  $worktree_dir"
-    echo ""
-    echo "To start working:"
-    echo "  cd $worktree_dir"
-    echo "  jt serve"
+    post_create_worktree "$worktree_dir"
 }
 
 cmd_open() {

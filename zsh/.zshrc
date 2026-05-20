@@ -93,3 +93,22 @@ source "$NVM_DIR/nvm.sh"
 command -v javm &> /dev/null || curl -fsSL https://javm.dev/install.sh | bash
 command -v javm &> /dev/null && eval "$(javm init bash)"
 export PATH="$HOME/.npm-global/bin:$PATH"
+
+
+# Added by Antigravity CLI installer
+export PATH="/Users/sebastianstoelen/.local/bin:$PATH"
+
+# jt wrapper: let the script ask us to cd the current shell into a worktree.
+jt() {
+  local cd_file rc target
+  cd_file=$(mktemp -t jt-cd 2>/dev/null) || cd_file="${TMPDIR:-/tmp}/jt-cd.$$"
+  : > "$cd_file"
+  JT_CD_FILE="$cd_file" command jt "$@"
+  rc=$?
+  if [ -s "$cd_file" ]; then
+    target=$(<"$cd_file")
+    [ -d "$target" ] && builtin cd "$target"
+  fi
+  rm -f "$cd_file"
+  return $rc
+}
