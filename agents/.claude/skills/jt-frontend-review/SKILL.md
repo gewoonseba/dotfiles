@@ -1,23 +1,36 @@
 ---
-name: frontend-review
+name: jt-frontend-review
 description: >
-  Review frontend React/TypeScript code for the Jolteon monorepo. Use this skill whenever the user asks
-  to review, audit, check, or critique frontend code — whether it's a PR diff, a specific file, a feature
-  branch, or a set of components. Also trigger when the user mentions "review my component", "check this
-  code", "code review", "PR review", "is this good React code", "audit the frontend", or wants feedback
-  on React/TypeScript code quality — even if they don't explicitly say "review". If the user pastes or
-  references frontend .tsx/.ts code and asks for feedback, use this skill.
+  Review frontend React/TypeScript code in the Jolteon monorepo. Use this skill whenever the user
+  asks to review, audit, check, or critique frontend code — a PR diff, a feature branch, a specific
+  file, or a set of components. Also trigger when the user mentions "review my component", "check
+  this code", "code review", "PR review", "is this good React code", "audit the frontend",
+  "design-system review", "token review", "is this on-system?", "are we using the right tokens",
+  "check styling", or any frontend-quality feedback request — even if they don't explicitly say
+  "review". If the user pastes or references frontend `.tsx`/`.ts` code and asks for feedback, use
+  this skill. The review covers both architectural quality (React Compiler, components, forms,
+  patterns) AND adherence to the locked color token system documented in DESIGN.md.
 ---
 
-# Frontend Code Review
+# Jolteon Frontend Code Review
 
-You are reviewing frontend code for the Jolteon monorepo — a React 19 + TypeScript application using
-TailwindCSS v4, Radix UI, shadcn/ui patterns, TanStack Query, and Zustand. The frontend lives at
-`services/frontend/src`.
+You are reviewing frontend code for the Jolteon monorepo — a React 19 + TypeScript application
+using TailwindCSS v4, Radix UI, shadcn/ui patterns, TanStack Query, and Zustand. The frontend
+lives at `services/frontend/src`.
 
-Your review should be constructive, specific, and actionable. Flag real issues, highlight good patterns,
-and suggest concrete improvements. Avoid nitpicking formatting (Prettier handles that) or linting issues
-(ESLint catches those).
+Your review should be constructive, specific, and actionable. Flag real issues, highlight good
+patterns, and suggest concrete improvements. Avoid nitpicking formatting (Prettier handles that) or
+purely-lint issues (ESLint catches those).
+
+The review has **two complementary lenses** — apply both:
+
+1. **Architecture / patterns** — React Compiler, shared components, shadcn awareness, file
+   structure, forms, formatters, etc. (sections 1–8 below).
+2. **Design token adherence** — the locked color system documented at the repo root in
+   [`DESIGN.md`](../../DESIGN.md). See section 9.
+
+If the user's request is purely about design tokens / styling, weight the review toward section 9
+and reference DESIGN.md as the source of truth.
 
 ---
 
@@ -54,8 +67,8 @@ custom versions of common UI elements, they should check what already exists.
 | **Buttons** | `button/` (Button with CVA variants, LoadButton) |
 | **Forms** | `form/` (FormWrapper, FormFieldWrapper, FormActions, Stepper), `input.tsx`, `textarea.tsx`, `interval-input.tsx` |
 | **Selection** | `select.tsx`, `multiselect.tsx`, `checkbox.tsx`, `radio-group.tsx`, `toggle.tsx`, `switch.tsx` |
-| **Data display** | `table/` (Table with sorting/filtering), `badge.tsx`, `metric/`, `insight-card/` |
-| **Feedback** | `toast/`, `spinner/`, `skeleton/`, `alert.tsx`, `Blocker.tsx`, `progress.tsx` |
+| **Data display** | `table/` (Table with sorting/filtering), `badge.tsx` (intent variants — see §9), `metric/`, `insight-card/` |
+| **Feedback** | `toast/`, `spinner/`, `skeleton/`, `alert.tsx`, `Blocker.tsx`, `progress.tsx`, `callout.tsx` (intent variants — see §9) |
 | **Overlays** | `dialog/`, `modal/`, `popover/`, `tooltip/`, `dropdown/` |
 | **Navigation** | `breadcrumb.tsx`, `command/`, `link/` |
 | **Layout** | `card/` (Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter), `accordion.tsx`, `accordion-card.tsx`, `resizable.tsx` |
@@ -73,8 +86,8 @@ custom versions of common UI elements, they should check what already exists.
 
 When reviewing, if you see a custom button, input, badge, card, modal, select, or similar UI
 primitive being created from scratch, flag it. The author should use or extend the existing shared
-components instead. If the existing component doesn't quite fit, the better path is usually to add a
-variant to the shared component rather than creating a one-off.
+components instead. If the existing component doesn't quite fit, the better path is usually to add
+a variant to the shared component rather than creating a one-off.
 
 ---
 
@@ -84,8 +97,8 @@ The project's shared components follow shadcn/ui patterns — built on Radix UI 
 with TailwindCSS, and using Class Variance Authority (CVA) for variants. The `cn()` utility from
 `lib/utils` handles className merging.
 
-When reviewing custom-built components, check whether shadcn already provides a suitable alternative.
-Common examples where authors reinvent what shadcn offers:
+When reviewing custom-built components, check whether shadcn already provides a suitable
+alternative. Common examples where authors reinvent what shadcn offers:
 
 - Custom dropdown menus → use `DropdownMenu` (Radix-based)
 - Custom tooltips → use `Tooltip` (already in `components/ui/tooltip/`)
@@ -101,15 +114,18 @@ styling."*
 
 ---
 
-## 4. TailwindCSS v4 styling
+## 4. TailwindCSS v4 styling — composes with the token system
 
 The project uses TailwindCSS v4. When reviewing styles:
 
 - Prefer Tailwind utility classes over inline styles or CSS modules
-- Check for hardcoded color values — they should use the design tokens defined in the Tailwind theme
+- **Every color-bearing utility must come from the locked token system in
+  [`DESIGN.md`](../../DESIGN.md).** See section 9 for the full enforcement.
 - Watch for overly long className strings that could be simplified with CVA variants or extracted
   into a shared component
 - Confirm that responsive breakpoints follow existing patterns in the codebase
+- Inline `style={{ color: '…', backgroundColor: '…' }}` with hard-coded values is a smell — it
+  bypasses the design system. Move to a token-driven className.
 
 ---
 
@@ -118,9 +134,9 @@ The project uses TailwindCSS v4. When reviewing styles:
 The codebase convention is that **local helper components** (small components used only within a
 single file) are defined **at the bottom of the file**, after the main exported component.
 
-When reviewing, if you see local components defined before the main component or scattered throughout
-the file, flag it: *"Convention: move local helper components to the end of the file, after the main
-exported component."*
+When reviewing, if you see local components defined before the main component or scattered
+throughout the file, flag it: *"Convention: move local helper components to the end of the file,
+after the main exported component."*
 
 The pattern looks like:
 
@@ -155,8 +171,8 @@ decision tree:
 2. **Scan the imports** — Does the file import from a specific `features/{domain}/` folder (hooks,
    api, types)? If yes, this component is domain-specific.
 3. **Check the component name** — Does it reference a specific business domain (e.g.,
-   `AssetDetailCard`, `NominationTable`, `ForecastChart`)? Domain-specific names mean domain-specific
-   code.
+   `AssetDetailCard`, `NominationTable`, `ForecastChart`)? Domain-specific names mean
+   domain-specific code.
 4. **Apply the rule**: A domain-specific component **must not** live in `components/`. It belongs
    in `features/{domain}/components/`.
 
@@ -216,16 +232,14 @@ Shared utilities, hooks, and helpers used across features:
 
 ---
 
-## 7. Additional review points
-
-Beyond the rules above, also check for:
+## 7. Patterns: forms, queries, formatters, i18n
 
 ### Backend-first computation
 This platform deals with time series data. Heavy data transformations (aggregations, filtering,
 sorting) should happen on the backend (Python/Polars/SQL), not in React components. If you see the
 frontend doing significant data processing that could be an API endpoint, flag it: *"This
-transformation could be moved to the backend. The frontend should receive pre-computed, display-ready
-data."*
+transformation could be moved to the backend. The frontend should receive pre-computed,
+display-ready data."*
 
 ### Form patterns: react-hook-form + zod + FormWrapper
 
@@ -267,11 +281,12 @@ ConfigCard forms."*
 - Loading and error states should be handled
 
 ### Internationalization (i18n)
-All user-facing UI labels, headings, descriptions, tooltips, placeholders, button text, error messages,
-and other display strings **must** use the translation system (`t()` from `i18next` or `useTranslation`
-from `react-i18next`), with keys defined in `src/i18n/locales/en.json`.
+All user-facing UI labels, headings, descriptions, tooltips, placeholders, button text, error
+messages, and other display strings **must** use the translation system (`t()` from `i18next` or
+`useTranslation` from `react-i18next`), with keys defined in `src/i18n/locales/en.json`.
 
-Flag any hardcoded English strings in JSX or component props that should be translated. Common violations:
+Flag any hardcoded English strings in JSX or component props that should be translated. Common
+violations:
 - Hardcoded text in JSX: `<h2>Energy Overview</h2>` → `<h2>{t("energy_overview")}</h2>`
 - Hardcoded props: `placeholder="Search..."` → `placeholder={t("search")}`
 - Hardcoded button labels: `<Button>Save</Button>` → `<Button>{t("save")}</Button>`
@@ -330,6 +345,10 @@ that duplicates what the shared formatters provide.
 *"This hardcodes a [currency symbol / power unit]. Use `[formatter name]` from `[file]` instead —
 it handles unit scaling and locale formatting automatically."*
 
+---
+
+## 8. Misc patterns
+
 ### No `'use client'` directives
 
 This is a Vite + React Router application — **not** Next.js. The `'use client'` directive has no
@@ -354,7 +373,7 @@ Flag any newly introduced caret or tilde ranges: *"Use a pinned version (`X.Y.Z`
 ### Import hygiene
 - Imports should be at the top of the file
 - Prefer named exports for components
-- Use path aliases (`@/` prefix) consistently
+- Use path aliases (`@/` prefix) consistently — never relative imports like `../../foo`
 
 ### TypeScript quality
 - Avoid `any` — use proper types
@@ -363,18 +382,127 @@ Flag any newly introduced caret or tilde ranges: *"Use a pinned version (`X.Y.Z`
 
 ---
 
+## 9. Design token adherence — DESIGN.md is the spec
+
+This is the design-system / colour lens. **The locked color token system is documented at the
+repo root in [`DESIGN.md`](../../DESIGN.md).** The May-2026 colour migration swept ~1,300 raw-Tailwind
+call sites and removed the shadcn legacy tokens; new code that reintroduces those patterns is a
+regression.
+
+Read DESIGN.md before this part of the review if you haven't already — the token list is short.
+
+### 9a. Removed tokens that should not reappear
+
+| Pattern (regex-ish) | Severity | Fix |
+|---|---|---|
+| `text-foreground` | high | `text-primary` |
+| `text-muted-foreground` | high | `text-secondary` |
+| `text-subtle-foreground` | high | `text-tertiary` |
+| `text-card-foreground`, `text-popover-foreground`, `text-accent-foreground`, `text-secondary-foreground` | high | `text-primary` |
+| `text-primary-foreground`, `text-destructive-foreground` | high | `text-white` |
+| `bg-card`, `bg-popover`, `bg-background`, `bg-white` | high | `bg-surface` |
+| `bg-muted`, `bg-accent`, `bg-secondary` (as fills) | high | `bg-surface-soft` |
+| `bg-gray-50`, `bg-gray-100` (as fills, not asset palette) | high | `bg-surface-soft` (or `bg-page` if it's a page shell) |
+| `bg-companion`, `text-companion`, `border-companion`, `ring-companion`, `fill-companion`, `from-companion`, etc. | high | swap `companion` → `brand` |
+| `bg-destructive`, `text-destructive`, `border-destructive`, etc. | high | swap `destructive` → `danger` |
+| `bg-primary`, `border-primary`, `text-primary` in the OLD shadcn meaning (= interactive emphasis: Switch, Slider, Progress, Checkbox, Badge default, active tab) | high | swap `primary` → `interactive`. Be careful: the NEW `text-primary` (body text) is valid — context matters. |
+| `bg-input`, `border-input` | medium | `bg-interactive-soft` for the fill use-case (Switch off, Slider track); bare `border` for the input border |
+| `border-gray-200`, `border-gray-300`, `border-slate-200`, `border-neutral-100` | medium | delete the utility — the default `border` colour is gray-200 via the base layer in `index.css` |
+| `border-gray-100`, `border-border/30`, `border-border/40`, `border-border/50` (and other `border-border/N` opacity overlays) | medium | `border-soft` |
+| `text-gray-400/500/600/700/900/950` | medium | `text-tertiary` / `-secondary` / `-primary` (see DESIGN.md mapping) |
+| `text-slate-600`, `text-slate-900`, `text-neutral-300` | low | same mapping by lightness band |
+| 3-stop gradients on Button / Badge variants (`bg-gradient-to-r from-X via-X to-X/95`) | medium | flat fill + `hover:bg-X/90` |
+| Hand-rolled callouts: `<div className="bg-red-50 text-red-700 border-red-200 …">` and similar amber/blue/green patterns | medium | `<Callout intent="danger\|warning\|info\|success">` |
+| Hand-rolled badges: `<span className="bg-green-100 text-green-700 …">` | medium | `<Badge intent="success">` |
+| Hand-rolled cards: `<div className="border rounded-lg bg-white p-4 shadow-sm">` | medium | `<Card>` |
+| Inline hex colors in className arbitrary values: `bg-[#…]`, `text-[#…]`, `border-[#…]` | medium | `bg-brand`, `bg-brand/N`, etc. — figure out which family the hex maps to |
+| Inline `style={{ backgroundColor: '…', color: '…' }}` with hard-coded colour | medium | a token-driven className |
+
+### 9b. Hand-rolled status patterns → primitive
+
+If you see the soft-fill pattern `bg-{color}-50 text-{color}-700 border-{color}-200` (or any
+intensity variant), that's a callout in disguise. The Callout component lives at
+`services/frontend/src/components/ui/callout.tsx`:
+
+```tsx
+<Callout intent="info|success|warning|danger|brand">
+```
+
+If you see `bg-{color}-100 text-{color}-700 border-{color}-200` on a small inline element, that's
+a Badge in disguise:
+
+```tsx
+<Badge intent="success|warning|danger|info|brand|neutral">
+```
+
+The legacy `<Badge variant="green|red|amber|blue|gray|alert">` API was removed. If callers still
+have those, flag them.
+
+### 9c. Surface / elevation patterns
+
+A common smell: differentiating containers by *colour* instead of by *shadow + z-index*.
+
+- `bg-card`, `bg-popover`, separate "elevated" backgrounds → all are `bg-surface`. What lifts a
+  popover is `shadow-md z-popover`, not a different colour token.
+- "Nested card needs a different fill" → almost always `bg-surface-soft` is enough; push back on
+  the design before inventing a 4th surface.
+- `bg-white/60` overlays on charts: flag as ambiguous (this is a real grey area — the migration
+  TODO doc captures these; don't auto-fix, just note).
+
+### 9d. Border patterns
+
+- `border border-gray-200` on a card → just `border` (the default colour is gray-200 globally).
+- `border-b border-gray-100` between rows → `border-b border-soft`.
+- `border border-border/40` outline → `border border-soft`.
+- Emphasised borders (focus rings, checkbox outlines, slider thumbs): `border-interactive`,
+  not `border-strong` (no such token) or `border-foreground` (removed).
+
+### 9e. Asset-palette exception
+
+The brand asset colours (`wind`, `gas`, `solar`, `battery`) are legitimately raw values, kept for
+asset-type icons. **Don't** flag `bg-solar` / `text-wind` / etc. They're not part of the UI design
+system; they're domain colours for visualising asset types.
+
+### 9f. Manual-review backlog
+
+Some sites were intentionally left for design judgement and tracked at
+`services/frontend/docs/color-system-todo.md` (chart overlays with `bg-white/60`, flow-canvas
+toolbars on brand gradients, calendar `!important` overrides, inline chart-palette hexes). If a
+review touches one of those, point to that doc rather than auto-flagging.
+
+### 9g. Sanity-grep checklist
+
+When scanning a diff, mentally run these patterns and second-look every hit in context:
+
+```
+gray-(100|200|300|400|500|600|700|800|900)
+(foreground|background|muted|accent|secondary|destructive|companion)
+text-primary             ← only valid in NEW meaning (body text); flag the OLD interactive-emphasis use
+bg-\[#                   ← inline hex
+style=\{\{ .*color       ← inline style with colour
+variant="(green|red|amber|yellow|blue|orange|purple|pink|gray|alert)"   ← legacy Badge variants
+```
+
+---
+
 ## Review output format
 
 Structure your review as follows:
 
-1. **Summary** — One paragraph: what the code does, overall quality assessment
-2. **Issues** — Concrete problems that should be fixed, ordered by severity
+1. **Summary** — One paragraph: what the code does, overall quality assessment, headline call on
+   whether the code is on-system (architecture + tokens).
+2. **Issues** — Concrete problems that should be fixed, ordered by severity. For token violations,
+   group them under a "Design token violations" sub-heading with `file:line` + the offending
+   snippet + the canonical replacement from DESIGN.md.
 3. **Suggestions** — Improvements that aren't blockers but would make the code better
-4. **Good patterns** — Call out things the author did well (reinforcing good habits matters)
+   (architectural, component opportunities, formatting).
+4. **Good patterns** — Call out things the author did well (reinforcing good habits matters,
+   including correct use of intent variants, `bg-surface-soft`, `<Callout>`, etc.).
 
 For each issue or suggestion, include:
 - The file and approximate location
 - What the problem is
-- A concrete suggestion for how to fix it
+- A concrete suggestion for how to fix it (or the canonical token / pattern)
 
-Keep the tone constructive. The goal is to help the author write better code, not to find fault.
+Keep the tone constructive. The goal is to help the author write better code and keep the design
+system intact, not to find fault.
