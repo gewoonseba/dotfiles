@@ -150,7 +150,7 @@ if [ ! -e "$HOME/.stow-global-ignore" ]; then
     echo "  󰄬 Linked .stow-global-ignore → \$HOME"
 fi
 
-STOW_FOLDERS="xremap scripts agents"
+STOW_FOLDERS="xremap scripts"
 
 for folder in $STOW_FOLDERS; do
     if [ -d "$folder" ]; then
@@ -159,6 +159,13 @@ for folder in $STOW_FOLDERS; do
         echo "  󰄬 Stowed $folder"
     fi
 done
+
+# 'agents' has its own sync flow — it stows itself and then symlinks the
+# resulting ~/.agents/skills into every agent's expected location.
+if [ -d "agents" ]; then
+    echo ""
+    bash "$SCRIPT_DIR/agents-sync-skills"
+fi
 
 echo ""
 echo "󰄬 System ready. If this is a first-time setup, log out and back in."

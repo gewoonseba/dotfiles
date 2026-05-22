@@ -59,7 +59,7 @@ stow -D folder-name       # Remove symlinks (destow)
 
 ### Current Tools
 
-- **agents/**: Shared agent skills for Claude Code and Codex (see below)
+- **agents/**: Shared agent skills for Claude Code, Codex, and Antigravity (see below)
 - **claude/**: Claude Code settings and commands (skills live in `agents/`)
 - **cursor/**: Cursor IDE (shared configs)
   - `.config/Cursor/User/settings.json`
@@ -74,23 +74,33 @@ stow -D folder-name       # Remove symlinks (destow)
 
 ### Shared Agent Skills (`agents/`)
 
-Claude Code (`~/.claude/skills/`) and Codex (`~/.codex/skills/`) both use the
-same `SKILL.md` format. To avoid duplicating skills, the canonical source lives
-in **one place** and is exposed to both agents via stow + an internal symlink:
+Claude Code, Codex, and Antigravity (`agy`) all use the same `SKILL.md`
+format. To avoid duplicating skills, the canonical source lives in **one
+place** — `agents/.agents/skills/` — and is exposed to every agent at its
+expected path.
 
 ```
-agents/
-  .claude/skills/<name>/SKILL.md     ← canonical: edit here
-  .codex/skills/<name> → ../../.claude/skills/<name>   (relative symlink)
+agents/.agents/skills/<name>/SKILL.md     ← canonical: edit here
 ```
 
-Stowing `agents` produces:
-- `~/.claude/skills` → `dotfiles/agents/.claude/skills` (folded)
-- `~/.codex/skills/<name>` → individual symlinks (preserves Codex's `.system/`)
+`agents-sync-skills` (run by `setup`, or anytime manually) sets this up:
 
-**Adding a new skill**: create `agents/.claude/skills/<name>/SKILL.md`, then
-run `agents-sync-codex-skills` to refresh the Codex symlinks (adds missing
-ones, removes dangling ones).
+1. `stow agents` → `~/.agents/skills/` becomes a folder of real files
+   pointing into the repo.
+2. The script then wires each agent's expected location to it:
+   - `~/.claude/skills`                                → symlink to `~/.agents/skills`
+   - `~/Library/Application Support/Antigravity/skills` → symlink to `~/.agents/skills` (macOS)
+   - `~/.codex/skills/<name>`                          → per-skill symlinks
+     (Codex bundles its own `.system/` here, so we can't replace the parent.)
+
+Cursor and other per-repo agents pick skills up automatically when a project
+has its own `.cursor/skills/` or `.agents/skills/`; the global set isn't
+exposed to them.
+
+**Adding a new skill**: create `agents/.agents/skills/<name>/SKILL.md`, then
+run `agents-sync-skills` to refresh the Codex per-skill symlinks (adds new,
+removes dangling). Claude/agy/Cursor pick it up immediately with no rerun
+needed — they're whole-dir symlinks.
 
 ## Adding a New Tool
 

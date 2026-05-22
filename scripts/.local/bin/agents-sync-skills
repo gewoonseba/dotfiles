@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# Sync agent skills so all agents (Claude Code, Codex, Antigravity, Cursor)
+# see the same set.
+#
+# Source of truth: ~/.agents/skills/  (managed by stow from dotfiles/agents/)
+#
+# Per agent:
+#   ~/.claude/skills                                  → symlink to source
+#   ~/Library/Application Support/Antigravity/skills  → symlink to source
+#   ~/.codex/skills/<each>                            → per-skill symlinks
+#       (Codex bundles its own .system/ here, so we can't replace the parent.)
+#
+# Idempotent. Re-run any time after adding or removing a skill.
+
+set -e
+
+SCRIPT_PATH=$(readlink -f "$0")
+DOTFILES_DIR=$(cd "$(dirname "$SCRIPT_PATH")/../../../" && pwd)
+SOURCE="$HOME/.agents/skills"
+
+cd "$DOTFILES_DIR"
+
+# 1. (Re)stow the agents package so ~/.agents/skills reflects the repo.
+echo "󰛢 Stowing agents package..."
+stow -D agents 2>/dev/null || true
+stow agents
+echo "  󰄬 ~/.agents/skills ← $DOTFILES_DIR/agents/.agents/skills"
+
+if [ ! -d "$SOURCE" ]; then
+    echo "󰅙 Expected $SOURCE after stow, but it's missing. Aborting." >&2
+    exit 1
+fi
+
+# Replace a directory with a single symlink to $SOURCE.
+# If the target is already that symlink: skip.
+# If it's a different symlink: replace.
+# If it's a real dir/file: back it up first.
+link_whole_dir() {
+    local target="$1"
+    local parent
+    parent=$(dirname "$target")
+    mkdir -p "$parent"
+
+    if [ -L "$target" ]; then
+        local current
+        current=$(readlink "$target")
+        if [ "$current" = "$SOURCE" ]; then
+            echo "  ✓ $target (already linked)"
+            return
+        fi
+        rm "$target"
+    elif [ -e "$target" ]; then
+        local backup="$target.bak-$(date +%Y%m%d-%H%M%S)"
+        mv "$target" "$backup"
+        echo "  󰀦 backed up $target → $backup"
+    fi
+
+    ln -s "$SOURCE" "$target"
+    echo "  + $target → $SOURCE"
+}
+
+# Symlink each skill in $SOURCE into $target_dir/<name>.
+# Preserves any other content (e.g. Codex's .system/) and prunes dangling
+# user-skill symlinks that no longer exist in $SOURCE.
+link_per_skill() {
+    local target_dir="$1"
+    mkdir -p "$target_dir"
+
+    local added=0 removed=0
+
+    # Add / update user skills
+    for skill in "$SOURCE"/*/; do
+        [ -d "$skill" ] || continue
+        local name
+        name=$(basename "$skill")
+        local link="$target_dir/$name"
+        local want="$SOURCE/$name"
+
+        if [ -L "$link" ] && [ "$(readlink "$link")" = "$want" ]; then
+            continue
+        fi
+        # Don't clobber non-symlink content (e.g. a real dir named the same)
+        if [ -e "$link" ] && [ ! -L "$link" ]; then
+            echo "  󰀦 skipping $link (not a symlink, won't overwrite)"
+            continue
+        fi
+        ln -sfn "$want" "$link"
+        added=$((added + 1))
+    done
+
+    # Remove dangling user-skill symlinks (anything pointing into $SOURCE
+    # whose target no longer exists). Leaves codex's bundled stuff alone.
+    for link in "$target_dir"/*; do
+        [ -L "$link" ] || continue
+        local dest
+        dest=$(readlink "$link")
+        case "$dest" in
+            "$SOURCE"/*|"$SOURCE")
+                if [ ! -e "$link" ]; then
+                    rm "$link"
+                    removed=$((removed + 1))
+                fi
+                ;;
+        esac
+    done
+
+    echo "  $target_dir (added: $added, removed: $removed)"
+}
+
+echo ""
+echo "󰌷 Linking Claude Code..."
+link_whole_dir "$HOME/.claude/skills"
+
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo ""
+    echo "󰌷 Linking Antigravity (agy)..."
+    link_whole_dir "$HOME/Library/Application Support/Antigravity/skills"
+fi
+
+echo ""
+echo "󰌷 Linking Codex per-skill (preserves bundled .system/)..."
+link_per_skill "$HOME/.codex/skills"
+
+echo ""
+echo "󰄬 Done."
