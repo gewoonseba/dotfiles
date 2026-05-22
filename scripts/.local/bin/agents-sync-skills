@@ -88,20 +88,15 @@ link_per_skill() {
         added=$((added + 1))
     done
 
-    # Remove dangling user-skill symlinks (anything pointing into $SOURCE
-    # whose target no longer exists). Leaves codex's bundled stuff alone.
+    # Remove any dangling symlink. Codex's bundled content lives in real
+    # directories (e.g. .system/), so dangling links are always orphans
+    # from a previous sync layout and safe to drop.
     for link in "$target_dir"/*; do
         [ -L "$link" ] || continue
-        local dest
-        dest=$(readlink "$link")
-        case "$dest" in
-            "$SOURCE"/*|"$SOURCE")
-                if [ ! -e "$link" ]; then
-                    rm "$link"
-                    removed=$((removed + 1))
-                fi
-                ;;
-        esac
+        if [ ! -e "$link" ]; then
+            rm "$link"
+            removed=$((removed + 1))
+        fi
     done
 
     echo "  $target_dir (added: $added, removed: $removed)"
