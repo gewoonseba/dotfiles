@@ -45,7 +45,8 @@
   "enabledPlugins": {
     "conversation-search@cc-conversation-search": true,
     "figma@claude-plugins-official": true,
-    "paper-desktop@paper": true
+    "paper-desktop@paper": true,
+    "chrome-devtools-mcp@chrome-devtools-plugins": true
   },
   "extraKnownMarketplaces": {
     "cc-conversation-search": {
@@ -64,6 +65,12 @@
       "source": {
         "source": "github",
         "repo": "paper-design/agent-plugins"
+      }
+    },
+    "chrome-devtools-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "ChromeDevTools/chrome-devtools-mcp"
       }
     }
   },

@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{{TITLE}}</title>
+<style>
+  :root {
+    --fg: #1f2328;
+    --muted: #6b7280;
+    --bg: #ffffff;
+    --bg-soft: #f6f8fa;
+    --border: #d0d7de;
+    --accent: #0969da;
+    --accent-soft: #ddf4ff;
+    --code-bg: #f6f8fa;
+    --good: #1a7f37;
+    --bad: #cf222e;
+    --warn: #9a6700;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: var(--sans);
+    color: var(--fg);
+    background: var(--bg);
+    line-height: 1.55;
+    margin: 0;
+    padding: 0;
+  }
+  .page {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 48px 32px 96px;
+  }
+  header.title {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 20px;
+    margin-bottom: 32px;
+  }
+  header.title .eyebrow {
+    color: var(--muted);
+    font-size: 13px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  h1 { font-size: 28px; line-height: 1.25; margin: 0 0 8px; }
+  header.title .lede { color: var(--muted); font-size: 15px; margin: 0; }
+  h2 {
+    font-size: 20px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 6px;
+    margin: 40px 0 14px;
+    scroll-margin-top: 16px;
+  }
+  h3 { font-size: 16px; margin: 24px 0 10px; scroll-margin-top: 16px; }
+  h4 { font-size: 14px; margin: 18px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  p { margin: 8px 0 12px; }
+  ul, ol { margin: 8px 0 12px; padding-left: 22px; }
+  li { margin: 4px 0; }
+  code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  pre {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.5;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 12px 0 18px;
+  }
+  pre code { background: transparent; border: 0; padding: 0; border-radius: 0; font-size: inherit; }
+  .ascii {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.35;
+    background: #fafbfc;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 12px 0 18px;
+    white-space: pre;
+  }
+  .toc {
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 0 0 32px;
+  }
+  .toc h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    border: 0; padding: 0; margin: 0 0 8px;
+  }
+  .toc ol { margin: 0; padding-left: 22px; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 20px;
+    font-size: 14px;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: var(--bg-soft); font-weight: 600; }
+  .callout {
+    background: var(--accent-soft);
+    border: 1px solid #b6e3ff;
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 14px 0 18px;
+    font-size: 14px;
+  }
+  .callout.warn { background: #fff6dc; border-color: #eecfa0; }
+  .callout.good { background: #e6f4ea; border-color: #b4dcbb; }
+  .pill {
+    display: inline-block;
+    font-size: 11px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-soft);
+    color: var(--muted);
+    margin-right: 6px;
+    vertical-align: middle;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .pill.fe   { color: var(--accent); border-color: #b6e3ff; background: var(--accent-soft); }
+  .pill.be   { color: var(--warn);   border-color: #eecfa0; background: #fff6dc; }
+  .pill.del  { color: var(--bad);    border-color: #f5b8be; background: #fbe9eb; }
+  .pill.keep { color: var(--good);   border-color: #b4dcbb; background: #e6f4ea; }
+  .pill.flag { color: var(--bad);    border-color: #f5b8be; background: #fbe9eb; }
+  .filelist { list-style: none; padding: 0; margin: 8px 0 18px; }
+  .filelist li { font-family: var(--mono); font-size: 13px; padding: 4px 0; }
+  .filelist .tag {
+    display: inline-block;
+    font-family: var(--sans);
+    font-size: 11px;
+    padding: 0 6px;
+    margin-right: 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    background: var(--bg-soft);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+  }
+  .filelist .tag.add  { color: var(--good);   border-color: #b4dcbb; background: #e6f4ea; }
+  .filelist .tag.mod  { color: var(--accent); border-color: #b6e3ff; background: var(--accent-soft); }
+  .filelist .tag.del  { color: var(--bad);    border-color: #f5b8be; background: #fbe9eb; }
+  .filelist .tag.be   { color: var(--warn);   border-color: #eecfa0; background: #fff6dc; }
+  .filelist .tag.keep { color: var(--muted); }
+  .filelist .tag.flag { color: var(--bad);    border-color: #f5b8be; background: #fbe9eb; }
+  .changelog {
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 0 0 24px;
+    font-size: 13px;
+  }
+  .changelog ul { margin: 6px 0 0; }
+  .key { font-weight: 600; color: var(--fg); }
+  footer.colophon {
+    color: var(--muted);
+    font-size: 13px;
+    border-top: 1px solid var(--border);
+    margin-top: 48px;
+    padding-top: 14px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="title">
+  <div class="eyebrow">{{EYEBROW — e.g. branch / project / category}}</div>
+  <h1>{{TITLE}}</h1>
+  <p class="lede">{{ONE-SENTENCE LEDE — what this document is for, in a single line}}</p>
+</header>
+
+<!-- Optional: a changelog block when this revises a previous version
+<div class="changelog">
+  <strong>What changed since v{{N-1}}.</strong>
+  <ul>
+    <li>{{change 1}}</li>
+    <li>{{change 2}}</li>
+  </ul>
+</div>
+-->
+
+<nav class="toc" aria-label="Table of contents">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#section-1">{{Section 1 title}}</a></li>
+    <li><a href="#section-2">{{Section 2 title}}</a>
+      <ol>
+        <li><a href="#section-2-1">{{Subsection}}</a></li>
+      </ol>
+    </li>
+    <!-- … -->
+  </ol>
+</nav>
+
+<section id="section-1">
+  <h2>1. {{Section title}}</h2>
+  <p>{{Paragraph.}}</p>
+
+  <!-- Code block -->
+  <pre><code>// example
+function foo() {}</code></pre>
+
+  <!-- Inline code: <code>useState</code> -->
+
+  <!-- ASCII diagram -->
+  <div class="ascii">flow:
+  A ──► B ──► C
+        │
+        └──► D</div>
+
+  <!-- Callouts -->
+  <div class="callout"><strong>Note.</strong> {{neutral aside}}</div>
+  <div class="callout warn"><strong>Heads up.</strong> {{warning}}</div>
+  <div class="callout good"><strong>Net result:</strong> {{positive outcome}}</div>
+
+  <!-- Comparison / decision table -->
+  <table>
+    <thead><tr><th>Aspect</th><th>Option A</th><th>Option B</th></tr></thead>
+    <tbody>
+      <tr><td>{{aspect}}</td><td>{{A}}</td><td>{{B}}</td></tr>
+    </tbody>
+  </table>
+
+  <!-- Pills -->
+  <p><span class="pill fe">FE</span><span class="pill be">BE</span><span class="pill keep">keep</span><span class="pill del">delete</span></p>
+
+  <!-- File-change list -->
+  <ul class="filelist">
+    <li><span class="tag add">add</span>path/to/new-file.ts</li>
+    <li><span class="tag mod">modify</span>path/to/existing.ts — what changes &amp; why</li>
+    <li><span class="tag del">del</span>path/to/obsolete.ts</li>
+    <li><span class="tag keep">keep</span>path/to/untouched.ts</li>
+  </ul>
+</section>
+
+<section id="section-2">
+  <h2>2. {{Section title}}</h2>
+
+  <h3 id="section-2-1">2.1 {{Subsection}}</h3>
+  <p>{{…}}</p>
+</section>
+
+<footer class="colophon">
+  Related: <code>{{path/to/related.html}}</code><br />
+  Branch: <code>{{branch-name}}</code>
+</footer>
+
+</div>
+</body>
+</html>

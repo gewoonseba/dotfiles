@@ -19,7 +19,9 @@ hint_worktree() {
 
 trap 'hint_worktree' ERR
 
-setup_worktree() {
+# Fast bits (~1s): env files + CLAUDE.md + .claude/.cursor/.vscode. These must
+# exist before an AI agent starts so it sees the full worktree.
+setup_worktree_fast() {
     local target_dir="$1"
 
     echo "Copying environment files..."
@@ -42,6 +44,11 @@ setup_worktree() {
             echo "  copied $d/"
         fi
     done
+}
+
+# Slow bits (tens of seconds to minutes): backgrounded with output to a log.
+setup_worktree_deps() {
+    local target_dir="$1"
 
     echo "Installing Python dependencies..."
     (cd "$target_dir" && uv sync --quiet)
@@ -53,22 +60,31 @@ setup_worktree() {
     (cd "$target_dir" && uv run pre-commit install)
 }
 
+# Full setup (used by 'jt worktree setup' where the user wants blocking output).
+setup_worktree() {
+    setup_worktree_fast "$1"
+    setup_worktree_deps "$1"
+}
+
 post_create_worktree() {
     local worktree_dir="$1"
     local log_file="$worktree_dir/.jt-setup.log"
 
-    echo ""
-    echo "Running setup in background (log: $log_file)..."
-    (setup_worktree "$worktree_dir" >"$log_file" 2>&1) &
+    # Fast bits synchronously so the agent sees CLAUDE.md / .claude/ on boot.
+    setup_worktree_fast "$worktree_dir"
+
+    # Slow bits in background, output to log.
+    (setup_worktree_deps "$worktree_dir" >"$log_file" 2>&1) &
     disown 2>/dev/null || true
 
-    # Signal the shell wrapper to cd the parent shell into the worktree.
+    # Always tell the wrapper where to cd, even if user aborts the prompt.
     if [ -n "${JT_CD_FILE:-}" ]; then
         printf '%s\n' "$worktree_dir" > "$JT_CD_FILE"
     fi
 
     echo ""
     echo "Worktree ready at: $worktree_dir"
+    echo "Dependencies installing in background (log: $log_file)"
     echo ""
     echo "Open an AI agent?"
     echo "  1) claude"
@@ -77,24 +93,28 @@ post_create_worktree() {
     echo "  4) none"
     read -rp "Choice [4]: " choice
 
-    cd "$worktree_dir"
+    local agent=""
     case "${choice:-4}" in
-        1|claude)
-            command -v claude >/dev/null 2>&1 || { echo "claude not found."; exit 0; }
-            exec claude
-            ;;
-        2|codex)
-            command -v codex >/dev/null 2>&1 || { echo "codex not found."; exit 0; }
-            exec codex
-            ;;
-        3|agy)
-            command -v agy >/dev/null 2>&1 || { echo "agy not found."; exit 0; }
-            exec agy
-            ;;
-        *)
-            exit 0
-            ;;
+        1|claude) agent="claude" ;;
+        2|codex)  agent="codex" ;;
+        3|agy)    agent="agy" ;;
     esac
+
+    # Wrapper path: hand the agent to the zsh function so it runs in the user's
+    # real shell (after the cd). The wrapper handles the "not found" case.
+    if [ -n "${JT_AGENT_FILE:-}" ]; then
+        [ -n "$agent" ] && printf '%s\n' "$agent" > "$JT_AGENT_FILE"
+        exit 0
+    fi
+
+    # Fallback for when jt is invoked without the zsh wrapper: best-effort
+    # cd + exec inside this process.
+    cd "$worktree_dir"
+    if [ -n "$agent" ]; then
+        command -v "$agent" >/dev/null 2>&1 || { echo "$agent not found."; exit 0; }
+        exec "$agent"
+    fi
+    exit 0
 }
 
 # Parse --lcl/--dev/--prd flags into $ENV_CHOICE. Unknown args go to $REMAINING_ARGS.

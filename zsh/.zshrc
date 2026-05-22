@@ -102,17 +102,34 @@ export PATH="$HOME/.npm-global/bin:$PATH"
 # Added by Antigravity CLI installer
 export PATH="/Users/sebastianstoelen/.local/bin:$PATH"
 
-# jt wrapper: let the script ask us to cd the current shell into a worktree.
+# jt wrapper: lets the script ask us to cd the current shell into a worktree
+# and (optionally) launch an AI agent in that shell after cd. Running the agent
+# from the wrapper — not from inside the jt bash process — keeps the user's
+# real zsh context (aliases, prompt, env) and makes the cd land in the right
+# order.
 jt() {
-  local cd_file rc target
+  local cd_file agent_file rc target agent
   cd_file=$(mktemp -t jt-cd 2>/dev/null) || cd_file="${TMPDIR:-/tmp}/jt-cd.$$"
+  agent_file=$(mktemp -t jt-agent 2>/dev/null) || agent_file="${TMPDIR:-/tmp}/jt-agent.$$"
   : > "$cd_file"
-  JT_CD_FILE="$cd_file" command jt "$@"
+  : > "$agent_file"
+  JT_CD_FILE="$cd_file" JT_AGENT_FILE="$agent_file" command jt "$@"
   rc=$?
   if [ -s "$cd_file" ]; then
     target=$(<"$cd_file")
     [ -d "$target" ] && builtin cd "$target"
   fi
-  rm -f "$cd_file"
+  if [ -s "$agent_file" ]; then
+    agent=$(<"$agent_file")
+    rm -f "$cd_file" "$agent_file"
+    if command -v "$agent" >/dev/null 2>&1; then
+      "$agent"
+      return
+    else
+      echo "jt: $agent not found in PATH"
+      return 1
+    fi
+  fi
+  rm -f "$cd_file" "$agent_file"
   return $rc
 }

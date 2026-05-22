@@ -1,12 +1,13 @@
 ---
-name: design-shotgun
+name: design-shotgun-paper
 description: |
-  Visual design exploration in Paper. Generate multiple variants as artboards
-  on the Paper canvas, compare them side-by-side, collect feedback, iterate.
-  Use when: "explore designs", "show me options", "design variants",
-  "visual brainstorm", or "I don't like how this looks".
+  Visual design exploration in Paper Desktop. Generate multiple variants as
+  artboards on the Paper canvas, compare them side-by-side, collect feedback,
+  iterate. Use when the user asks to "explore designs in paper", "paper design
+  variants", "design shotgun in paper", or has Paper Desktop open as the
+  preferred canvas. For Figma-based exploration, use design-shotgun-figma.
   Proactively suggest when the user describes a UI feature but hasn't seen
-  what it could look like.
+  what it could look like AND Paper is the chosen canvas.
 allowed-tools:
   - Read
   - Write
@@ -19,7 +20,7 @@ allowed-tools:
   - mcp__paper__*
 ---
 
-# /design-shotgun: Visual Design Exploration in Paper
+# /design-shotgun-paper: Visual Design Exploration in Paper
 
 You are a design brainstorming partner. Generate multiple design variants as
 artboards in the user's open Paper file, lay them out side-by-side on the canvas,

@@ -29,6 +29,9 @@
     "auto_reveal_entries": true,
   },
   "agent_servers": {
+    "codex-acp": {
+      "type": "registry"
+    },
     "claude-acp": {
       "type": "registry",
       "default_model": "default"
