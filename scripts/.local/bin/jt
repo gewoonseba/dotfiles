@@ -196,6 +196,7 @@ cmd_worktree_create() {
 
 cmd_worktree_checkout() {
     local branch="${1:-}"
+    local preamble="${2:-}"
     [ -z "$branch" ] && { echo "Usage: jt worktree checkout <branch>"; exit 1; }
     local worktree_dir="$WORKSPACE/$branch"
 
@@ -219,7 +220,7 @@ cmd_worktree_checkout() {
     git -C "$REPO" worktree add "$worktree_dir" "origin/$branch"
     git -C "$worktree_dir" checkout -b "$branch" 2>/dev/null || true
 
-    post_create_worktree "$worktree_dir"
+    post_create_worktree "$worktree_dir" "$preamble"
 }
 
 cmd_worktree_open() {
@@ -519,6 +520,48 @@ Ticket: $url
 Before making changes, fetch the ticket for full context — e.g. \`gh issue view $url\` — then review the relevant code and propose an approach."
 
     cmd_worktree_create "$branch" "$preamble"
+}
+
+# ─── PR commands ───────────────────────────────────────────
+
+cmd_pr_start() {
+    local url="${1:-}"
+    [ -z "$url" ] && { echo "Usage: jt pr start <github-pr-url|number>"; exit 1; }
+
+    command -v gh >/dev/null 2>&1 || { echo "Error: gh (GitHub CLI) is required for 'jt pr'."; exit 1; }
+
+    # Accept a full PR URL or a bare number (defaults to the jolteon repo).
+    local owner repo number
+    if [[ "$url" =~ github\.com/([^/]+)/([^/]+)/pull/([0-9]+) ]]; then
+        owner="${BASH_REMATCH[1]}"; repo="${BASH_REMATCH[2]}"; number="${BASH_REMATCH[3]}"
+    elif [[ "$url" =~ ^[0-9]+$ ]]; then
+        owner="Companion-energy"; repo="jolteon"; number="$url"
+        url="https://github.com/$owner/$repo/pull/$number"
+    else
+        echo "Error: not a GitHub PR URL or number: $url"
+        echo "Expected: https://github.com/<owner>/<repo>/pull/<number>"
+        exit 1
+    fi
+
+    echo "Fetching PR #$number from $owner/$repo..."
+    local meta branch title
+    meta=$(gh pr view "$number" --repo "$owner/$repo" --json headRefName,title \
+        --jq '"\(.headRefName // "")\t\(.title // "")"' 2>/dev/null) \
+        || { echo "Error: could not fetch PR #$number from $owner/$repo (does it exist? are you authenticated with gh?)."; exit 1; }
+    branch="${meta%%$'\t'*}"
+    title="${meta#*$'\t'}"
+    [ -z "$branch" ] && { echo "Error: PR #$number has no head branch (cross-fork PRs aren't supported)."; exit 1; }
+
+    echo "PR:      #$number  $title"
+    echo "Branch:  $branch"
+
+    local preamble
+    preamble="You're reviewing GitHub PR #$number: \"$title\".
+PR: $url
+
+This worktree has the PR branch checked out. Run the /code-review skill to review the diff against main, then summarise the findings."
+
+    cmd_worktree_checkout "$branch" "$preamble"
 }
 
 # ─── App commands ──────────────────────────────────────────
@@ -859,6 +902,11 @@ Ticket (start work from a GitHub issue):
                                        and launch the chosen agent with the ticket
                                        link as a starting prompt
 
+PR (review an existing pull request):
+  jt pr start <url|number>             Check out the PR's branch into a worktree and
+                                       launch the chosen agent primed to run
+                                       /code-review on the diff
+
 App (backend + frontend):
   jt app run [--lcl|--dev|--prd]       Start backend + frontend (default: lcl)
   jt app stop                          Stop backend + frontend
@@ -887,6 +935,8 @@ Other:
 Examples:
   jt ticket start https://github.com/Companion-energy/jolteon/issues/5918
   jt ticket start 5918
+  jt pr start https://github.com/Companion-energy/jolteon/pull/5917
+  jt pr start 5917
   jt worktree create feat/battery-charts
   jt worktree checkout feat/partner-portal-v1
   jt wt open feat/battery-charts
@@ -967,6 +1017,15 @@ dispatch_ticket() {
     esac
 }
 
+dispatch_pr() {
+    local verb="${1:-}"
+    shift 2>/dev/null || true
+    case "$verb" in
+        start) cmd_pr_start "${1:-}" ;;
+        *)     echo "Unknown pr verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
+    esac
+}
+
 dispatch_diff() {
     local verb="${1:-open}"
     shift 2>/dev/null || true
@@ -987,6 +1046,7 @@ case "$noun" in
     sdk)            dispatch_sdk "$@" ;;
     diff)           dispatch_diff "$@" ;;
     ticket)         dispatch_ticket "$@" ;;
+    pr)             dispatch_pr "$@" ;;
     setup)          cmd_worktree_setup "${1:-}" ;;
     help|-h|--help) cmd_help ;;
     *)              echo "Unknown command: $noun"; echo "Run 'jt help' for usage."; exit 1 ;;

@@ -20,6 +20,7 @@ _jt() {
                 sdk)         _jt_sdk ;;
                 diff)        _jt_diff ;;
                 ticket)      _jt_ticket ;;
+                pr)          _jt_pr ;;
                 setup)       _jt_branches_or_path ;;
             esac
             ;;
@@ -37,6 +38,7 @@ _jt_nouns() {
         'sdk:SDK generation'
         'diff:PR-style local diff viewer in cmux'
         'ticket:start work from a GitHub issue'
+        'pr:review an existing pull request'
         'setup:run setup in current dir (alias for worktree setup)'
         'help:show help'
     )
@@ -210,6 +212,31 @@ _jt_ticket_verbs() {
     local -a verbs
     verbs=(
         'start:create worktree+branch from a GitHub issue and launch an agent'
+    )
+    _describe 'verb' verbs
+}
+
+_jt_pr() {
+    local context state state_descr line
+    typeset -A opt_args
+
+    _arguments -C \
+        '1: :_jt_pr_verbs' \
+        '*::arg:->arg'
+
+    case $state in
+        arg)
+            if [[ $line[1] == start ]]; then
+                _message 'GitHub PR URL or number'
+            fi
+            ;;
+    esac
+}
+
+_jt_pr_verbs() {
+    local -a verbs
+    verbs=(
+        'start:check out a PR branch into a worktree and launch an agent to review it'
     )
     _describe 'verb' verbs
 }
