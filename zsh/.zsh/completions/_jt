@@ -18,6 +18,8 @@ _jt() {
                 mcp)         _jt_mcp ;;
                 browser)     _jt_browser ;;
                 sdk)         _jt_sdk ;;
+                diff)        _jt_diff ;;
+                ticket)      _jt_ticket ;;
                 setup)       _jt_branches_or_path ;;
             esac
             ;;
@@ -33,6 +35,8 @@ _jt_nouns() {
         'mcp:MCP service'
         'browser:agent browser'
         'sdk:SDK generation'
+        'diff:PR-style local diff viewer in cmux'
+        'ticket:start work from a GitHub issue'
         'setup:run setup in current dir (alias for worktree setup)'
         'help:show help'
     )
@@ -181,6 +185,58 @@ _jt_sdk() {
     verbs=(
         'generate:generate dashboard API TypeScript SDK'
         'gen:alias for generate'
+    )
+    _describe 'verb' verbs
+}
+
+_jt_ticket() {
+    local context state state_descr line
+    typeset -A opt_args
+
+    _arguments -C \
+        '1: :_jt_ticket_verbs' \
+        '*::arg:->arg'
+
+    case $state in
+        arg)
+            if [[ $line[1] == start ]]; then
+                _message 'GitHub issue URL or number'
+            fi
+            ;;
+    esac
+}
+
+_jt_ticket_verbs() {
+    local -a verbs
+    verbs=(
+        'start:create worktree+branch from a GitHub issue and launch an agent'
+    )
+    _describe 'verb' verbs
+}
+
+_jt_diff() {
+    local context state state_descr line
+    typeset -A opt_args
+
+    _arguments -C \
+        '1: :_jt_diff_verbs' \
+        '*::flag:->flag'
+
+    case $state in
+        flag)
+            if [[ $line[1] == open ]]; then
+                _values 'flag' \
+                    '--base[branch to diff against]:branch:_jt_local_branches'
+            fi
+            ;;
+    esac
+}
+
+_jt_diff_verbs() {
+    local -a verbs
+    verbs=(
+        'open:open diffhub in a cmux browser split'
+        'stop:stop any running diffhub process'
     )
     _describe 'verb' verbs
 }

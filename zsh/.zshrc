@@ -108,12 +108,14 @@ export PATH="/Users/sebastianstoelen/.local/bin:$PATH"
 # real zsh context (aliases, prompt, env) and makes the cd land in the right
 # order.
 jt() {
-  local cd_file agent_file rc target agent
+  local cd_file agent_file prompt_file rc target agent prompt
   cd_file=$(mktemp -t jt-cd 2>/dev/null) || cd_file="${TMPDIR:-/tmp}/jt-cd.$$"
   agent_file=$(mktemp -t jt-agent 2>/dev/null) || agent_file="${TMPDIR:-/tmp}/jt-agent.$$"
+  prompt_file=$(mktemp -t jt-prompt 2>/dev/null) || prompt_file="${TMPDIR:-/tmp}/jt-prompt.$$"
   : > "$cd_file"
   : > "$agent_file"
-  JT_CD_FILE="$cd_file" JT_AGENT_FILE="$agent_file" command jt "$@"
+  : > "$prompt_file"
+  JT_CD_FILE="$cd_file" JT_AGENT_FILE="$agent_file" JT_PROMPT_FILE="$prompt_file" command jt "$@"
   rc=$?
   if [ -s "$cd_file" ]; then
     target=$(<"$cd_file")
@@ -121,15 +123,25 @@ jt() {
   fi
   if [ -s "$agent_file" ]; then
     agent=$(<"$agent_file")
-    rm -f "$cd_file" "$agent_file"
+    prompt=""
+    [ -s "$prompt_file" ] && prompt=$(<"$prompt_file")
+    rm -f "$cd_file" "$agent_file" "$prompt_file"
     if command -v "$agent" >/dev/null 2>&1; then
-      "$agent"
+      # claude/codex take the prompt positionally; agy needs -i.
+      if [ -n "$prompt" ]; then
+        case "$agent" in
+          agy) "$agent" -i "$prompt" ;;
+          *)   "$agent" "$prompt" ;;
+        esac
+      else
+        "$agent"
+      fi
       return
     else
       echo "jt: $agent not found in PATH"
       return 1
     fi
   fi
-  rm -f "$cd_file" "$agent_file"
+  rm -f "$cd_file" "$agent_file" "$prompt_file"
   return $rc
 }

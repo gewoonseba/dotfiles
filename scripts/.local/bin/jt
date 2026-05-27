@@ -66,8 +66,22 @@ setup_worktree() {
     setup_worktree_deps "$1"
 }
 
+# Launch an agent, optionally seeding it with an initial prompt. claude and
+# codex take the prompt as a positional arg; agy needs -i (--prompt-interactive).
+exec_agent() {
+    local agent="$1" prompt="${2:-}"
+    if [ -z "$prompt" ]; then
+        exec "$agent"
+    fi
+    case "$agent" in
+        agy) exec "$agent" -i "$prompt" ;;
+        *)   exec "$agent" "$prompt" ;;
+    esac
+}
+
 post_create_worktree() {
     local worktree_dir="$1"
+    local preamble="${2:-}"
     local log_file="$worktree_dir/.jt-setup.log"
 
     # Fast bits synchronously so the agent sees CLAUDE.md / .claude/ on boot.
@@ -100,10 +114,14 @@ post_create_worktree() {
         3|agy)    agent="agy" ;;
     esac
 
-    # Wrapper path: hand the agent to the zsh function so it runs in the user's
-    # real shell (after the cd). The wrapper handles the "not found" case.
+    # Wrapper path: hand the agent (and any preamble) to the zsh function so it
+    # runs in the user's real shell (after the cd). The wrapper handles the
+    # "not found" case.
     if [ -n "${JT_AGENT_FILE:-}" ]; then
-        [ -n "$agent" ] && printf '%s\n' "$agent" > "$JT_AGENT_FILE"
+        if [ -n "$agent" ]; then
+            printf '%s\n' "$agent" > "$JT_AGENT_FILE"
+            [ -n "$preamble" ] && [ -n "${JT_PROMPT_FILE:-}" ] && printf '%s' "$preamble" > "$JT_PROMPT_FILE"
+        fi
         exit 0
     fi
 
@@ -112,7 +130,7 @@ post_create_worktree() {
     cd "$worktree_dir"
     if [ -n "$agent" ]; then
         command -v "$agent" >/dev/null 2>&1 || { echo "$agent not found."; exit 0; }
-        exec "$agent"
+        exec_agent "$agent" "$preamble"
     fi
     exit 0
 }
@@ -157,6 +175,7 @@ prompt_env() {
 
 cmd_worktree_create() {
     local branch="${1:-}"
+    local preamble="${2:-}"
     [ -z "$branch" ] && { echo "Usage: jt worktree create <branch>"; exit 1; }
     local worktree_dir="$WORKSPACE/$branch"
 
@@ -172,7 +191,7 @@ cmd_worktree_create() {
     git -C "$REPO" worktree add -b "$branch" "$worktree_dir" origin/main
     git -C "$worktree_dir" push -u origin "$branch" --quiet
 
-    post_create_worktree "$worktree_dir"
+    post_create_worktree "$worktree_dir" "$preamble"
 }
 
 cmd_worktree_checkout() {
@@ -425,6 +444,83 @@ cmd_worktree_edit() {
     "$zed_cmd" "$dir"
 }
 
+# ─── Ticket commands ───────────────────────────────────────
+
+# Derive a branch name "<prefix>/<number>-<slug>" from a ticket. Prefix comes
+# from the GitHub issue type, falling back to a conventional title prefix
+# (feat:/fix:/chore(scope):), else "feat".
+ticket_branch_name() {
+    local number="$1" title="$2" itype="$3"
+    local key="" prefix slug
+    local conv_re='^([a-zA-Z]+)(\([^)]*\))?:'
+
+    if [ -n "$itype" ]; then
+        key="$itype"
+    elif [[ "$title" =~ $conv_re ]]; then
+        key="${BASH_REMATCH[1]}"
+    fi
+
+    case "$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')" in
+        bug|fix)                                                  prefix="fix" ;;
+        task|chore|"tech debt"|techdebt|docs|refactor|test|perf|ci|build|style) prefix="chore" ;;
+        *)                                                        prefix="feat" ;;
+    esac
+
+    # Slug from the title: drop a leading conventional prefix, lowercase,
+    # collapse non-alphanumerics to '-', trim, cap length.
+    slug="$(printf '%s' "$title" \
+        | sed -E 's/^[a-zA-Z]+(\([^)]*\))?:[[:space:]]*//' \
+        | tr '[:upper:]' '[:lower:]' \
+        | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' \
+        | cut -c1-50 | sed -E 's/-+$//')"
+    [ -z "$slug" ] && slug="ticket"
+
+    printf '%s/%s-%s' "$prefix" "$number" "$slug"
+}
+
+cmd_ticket_start() {
+    local url="${1:-}"
+    [ -z "$url" ] && { echo "Usage: jt ticket start <github-issue-url|number>"; exit 1; }
+
+    command -v gh >/dev/null 2>&1 || { echo "Error: gh (GitHub CLI) is required for 'jt ticket'."; exit 1; }
+
+    # Accept a full issue URL or a bare number (defaults to the jolteon repo).
+    local owner repo number
+    if [[ "$url" =~ github\.com/([^/]+)/([^/]+)/issues/([0-9]+) ]]; then
+        owner="${BASH_REMATCH[1]}"; repo="${BASH_REMATCH[2]}"; number="${BASH_REMATCH[3]}"
+    elif [[ "$url" =~ ^[0-9]+$ ]]; then
+        owner="Companion-energy"; repo="jolteon"; number="$url"
+        url="https://github.com/$owner/$repo/issues/$number"
+    else
+        echo "Error: not a GitHub issue URL or number: $url"
+        echo "Expected: https://github.com/<owner>/<repo>/issues/<number>"
+        exit 1
+    fi
+
+    echo "Fetching ticket #$number from $owner/$repo..."
+    local meta title itype
+    meta=$(gh api graphql -f query="{ repository(owner: \"$owner\", name: \"$repo\") { issue(number: $number) { title issueType { name } } } }" \
+        --jq '.data.repository.issue | "\(.issueType.name // "")\t\(.title // "")"' 2>/dev/null) \
+        || { echo "Error: could not fetch issue #$number from $owner/$repo (does it exist? are you authenticated with gh?)."; exit 1; }
+    itype="${meta%%$'\t'*}"
+    title="${meta#*$'\t'}"
+    [ -z "$title" ] && { echo "Error: issue #$number has no title (not found?)."; exit 1; }
+
+    local branch
+    branch="$(ticket_branch_name "$number" "$title" "$itype")"
+
+    echo "Ticket:  #$number  $title"
+    echo "Branch:  $branch"
+
+    local preamble
+    preamble="You're starting work on GitHub issue #$number: \"$title\".
+Ticket: $url
+
+Before making changes, fetch the ticket for full context — e.g. \`gh issue view $url\` — then review the relevant code and propose an approach."
+
+    cmd_worktree_create "$branch" "$preamble"
+}
+
 # ─── App commands ──────────────────────────────────────────
 
 cmd_app_run() {
@@ -665,6 +761,30 @@ cmd_browser_stop() {
     fi
 }
 
+# ─── Diff commands ─────────────────────────────────────────
+
+cmd_diff_open() {
+    local base=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -b|--base) base="${2:-}"; [ -z "$base" ] && { echo "--base needs a value"; exit 1; }; shift 2 ;;
+            *)         echo "Unknown argument: $1"; echo "Usage: jt diff open [--base <branch>]"; exit 1 ;;
+        esac
+    done
+
+    local -a args=(diffhub cmux)
+    [ -n "$base" ] && args+=(--base "$base")
+    exec npx "${args[@]}"
+}
+
+cmd_diff_stop() {
+    if pkill -f 'diffhub' 2>/dev/null; then
+        echo "Stopped diffhub"
+    else
+        echo "No diffhub process running."
+    fi
+}
+
 # ─── SDK commands ──────────────────────────────────────────
 
 cmd_sdk_generate() {
@@ -733,6 +853,12 @@ Worktree (alias: wt):
   jt worktree nuke <branch>            Force-remove worktree + delete local AND
                                        remote branch (destructive)
 
+Ticket (start work from a GitHub issue):
+  jt ticket start <url|number>         Create a worktree+branch from a GitHub issue
+                                       (branch inferred from issue type + title)
+                                       and launch the chosen agent with the ticket
+                                       link as a starting prompt
+
 App (backend + frontend):
   jt app run [--lcl|--dev|--prd]       Start backend + frontend (default: lcl)
   jt app stop                          Stop backend + frontend
@@ -748,6 +874,10 @@ Browser:
 SDK:
   jt sdk generate                      Generate the dashboard API TypeScript SDK
 
+Diff (PR-style local diff viewer in cmux):
+  jt diff open [--base <branch>]       Open diffhub in a cmux browser split
+  jt diff stop                         Stop any running diffhub process
+
 Shortcuts:
   jt setup [branch|path]               Alias for 'jt worktree setup' (default: cwd)
 
@@ -755,6 +885,8 @@ Other:
   jt help                              Show this help
 
 Examples:
+  jt ticket start https://github.com/Companion-energy/jolteon/issues/5918
+  jt ticket start 5918
   jt worktree create feat/battery-charts
   jt worktree checkout feat/partner-portal-v1
   jt wt open feat/battery-charts
@@ -763,6 +895,8 @@ Examples:
   jt mcp run --prd --port 9000
   jt browser open customer
   jt browser open root http://localhost:5173/admin
+  jt diff open
+  jt diff open --base main
 HELP
 }
 
@@ -824,6 +958,25 @@ dispatch_sdk() {
     esac
 }
 
+dispatch_ticket() {
+    local verb="${1:-}"
+    shift 2>/dev/null || true
+    case "$verb" in
+        start) cmd_ticket_start "${1:-}" ;;
+        *)     echo "Unknown ticket verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
+    esac
+}
+
+dispatch_diff() {
+    local verb="${1:-open}"
+    shift 2>/dev/null || true
+    case "$verb" in
+        open) cmd_diff_open "$@" ;;
+        stop) cmd_diff_stop ;;
+        *)    echo "Unknown diff verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
+    esac
+}
+
 noun="${1:-help}"
 shift 2>/dev/null || true
 case "$noun" in
@@ -832,6 +985,8 @@ case "$noun" in
     mcp)            dispatch_mcp "$@" ;;
     browser)        dispatch_browser "$@" ;;
     sdk)            dispatch_sdk "$@" ;;
+    diff)           dispatch_diff "$@" ;;
+    ticket)         dispatch_ticket "$@" ;;
     setup)          cmd_worktree_setup "${1:-}" ;;
     help|-h|--help) cmd_help ;;
     *)              echo "Unknown command: $noun"; echo "Run 'jt help' for usage."; exit 1 ;;
