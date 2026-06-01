@@ -78,5 +78,6 @@
   "tui": "fullscreen",
   "skipDangerousModePermissionPrompt": true,
   "remoteControlAtStartup": true,
-  "skipAutoPermissionPrompt": true
+  "skipAutoPermissionPrompt": true,
+  "skipWorkflowUsageWarning": true
 }

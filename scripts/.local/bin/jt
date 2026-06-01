@@ -445,12 +445,12 @@ cmd_worktree_edit() {
     "$zed_cmd" "$dir"
 }
 
-# ─── Ticket commands ───────────────────────────────────────
+# ─── Issue commands ────────────────────────────────────────
 
-# Derive a branch name "<prefix>/<number>-<slug>" from a ticket. Prefix comes
+# Derive a branch name "<prefix>/<number>-<slug>" from an issue. Prefix comes
 # from the GitHub issue type, falling back to a conventional title prefix
 # (feat:/fix:/chore(scope):), else "feat".
-ticket_branch_name() {
+issue_branch_name() {
     local number="$1" title="$2" itype="$3"
     local key="" prefix slug
     local conv_re='^([a-zA-Z]+)(\([^)]*\))?:'
@@ -474,16 +474,16 @@ ticket_branch_name() {
         | tr '[:upper:]' '[:lower:]' \
         | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' \
         | cut -c1-50 | sed -E 's/-+$//')"
-    [ -z "$slug" ] && slug="ticket"
+    [ -z "$slug" ] && slug="issue"
 
     printf '%s/%s-%s' "$prefix" "$number" "$slug"
 }
 
-cmd_ticket_start() {
+cmd_issue_start() {
     local url="${1:-}"
-    [ -z "$url" ] && { echo "Usage: jt ticket start <github-issue-url|number>"; exit 1; }
+    [ -z "$url" ] && { echo "Usage: jt issue start <github-issue-url|number>"; exit 1; }
 
-    command -v gh >/dev/null 2>&1 || { echo "Error: gh (GitHub CLI) is required for 'jt ticket'."; exit 1; }
+    command -v gh >/dev/null 2>&1 || { echo "Error: gh (GitHub CLI) is required for 'jt issue'."; exit 1; }
 
     # Accept a full issue URL or a bare number (defaults to the jolteon repo).
     local owner repo number
@@ -498,7 +498,7 @@ cmd_ticket_start() {
         exit 1
     fi
 
-    echo "Fetching ticket #$number from $owner/$repo..."
+    echo "Fetching issue #$number from $owner/$repo..."
     local meta title itype
     meta=$(gh api graphql -f query="{ repository(owner: \"$owner\", name: \"$repo\") { issue(number: $number) { title issueType { name } } } }" \
         --jq '.data.repository.issue | "\(.issueType.name // "")\t\(.title // "")"' 2>/dev/null) \
@@ -508,25 +508,25 @@ cmd_ticket_start() {
     [ -z "$title" ] && { echo "Error: issue #$number has no title (not found?)."; exit 1; }
 
     local branch
-    branch="$(ticket_branch_name "$number" "$title" "$itype")"
+    branch="$(issue_branch_name "$number" "$title" "$itype")"
 
-    echo "Ticket:  #$number  $title"
+    echo "Issue:   #$number  $title"
     echo "Branch:  $branch"
 
     local preamble
     preamble="You're starting work on GitHub issue #$number: \"$title\".
-Ticket: $url
+Issue: $url
 
-Before making changes, fetch the ticket for full context — e.g. \`gh issue view $url\` — then review the relevant code and propose an approach."
+Before making changes, fetch the issue for full context — e.g. \`gh issue view $url\` — then review the relevant code and propose an approach."
 
     cmd_worktree_create "$branch" "$preamble"
 }
 
 # ─── PR commands ───────────────────────────────────────────
 
-cmd_pr_start() {
+cmd_pr_review() {
     local url="${1:-}"
-    [ -z "$url" ] && { echo "Usage: jt pr start <github-pr-url|number>"; exit 1; }
+    [ -z "$url" ] && { echo "Usage: jt pr review <github-pr-url|number>"; exit 1; }
 
     command -v gh >/dev/null 2>&1 || { echo "Error: gh (GitHub CLI) is required for 'jt pr'."; exit 1; }
 
@@ -555,11 +555,9 @@ cmd_pr_start() {
     echo "PR:      #$number  $title"
     echo "Branch:  $branch"
 
-    local preamble
-    preamble="You're reviewing GitHub PR #$number: \"$title\".
-PR: $url
-
-This worktree has the PR branch checked out. Run the /code-review skill to review the diff against main, then summarise the findings."
+    # Invoke the /code-review skill directly — the worktree has the PR branch
+    # checked out, so the skill reviews the PR's diff against main.
+    local preamble="/code-review"
 
     cmd_worktree_checkout "$branch" "$preamble"
 }
@@ -896,16 +894,16 @@ Worktree (alias: wt):
   jt worktree nuke <branch>            Force-remove worktree + delete local AND
                                        remote branch (destructive)
 
-Ticket (start work from a GitHub issue):
-  jt ticket start <url|number>         Create a worktree+branch from a GitHub issue
+Issue (start work from a GitHub issue):
+  jt issue start <url|number>          Create a worktree+branch from a GitHub issue
                                        (branch inferred from issue type + title)
-                                       and launch the chosen agent with the ticket
+                                       and launch the chosen agent with the issue
                                        link as a starting prompt
 
 PR (review an existing pull request):
-  jt pr start <url|number>             Check out the PR's branch into a worktree and
-                                       launch the chosen agent primed to run
-                                       /code-review on the diff
+  jt pr review <url|number>            Check out the PR's branch into a worktree and
+                                       launch the chosen agent with /code-review as
+                                       the initial prompt
 
 App (backend + frontend):
   jt app run [--lcl|--dev|--prd]       Start backend + frontend (default: lcl)
@@ -933,10 +931,10 @@ Other:
   jt help                              Show this help
 
 Examples:
-  jt ticket start https://github.com/Companion-energy/jolteon/issues/5918
-  jt ticket start 5918
-  jt pr start https://github.com/Companion-energy/jolteon/pull/5917
-  jt pr start 5917
+  jt issue start https://github.com/Companion-energy/jolteon/issues/5918
+  jt issue start 5918
+  jt pr review https://github.com/Companion-energy/jolteon/pull/5917
+  jt pr review 5917
   jt worktree create feat/battery-charts
   jt worktree checkout feat/partner-portal-v1
   jt wt open feat/battery-charts
@@ -1008,12 +1006,12 @@ dispatch_sdk() {
     esac
 }
 
-dispatch_ticket() {
+dispatch_issue() {
     local verb="${1:-}"
     shift 2>/dev/null || true
     case "$verb" in
-        start) cmd_ticket_start "${1:-}" ;;
-        *)     echo "Unknown ticket verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
+        start) cmd_issue_start "${1:-}" ;;
+        *)     echo "Unknown issue verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
     esac
 }
 
@@ -1021,8 +1019,8 @@ dispatch_pr() {
     local verb="${1:-}"
     shift 2>/dev/null || true
     case "$verb" in
-        start) cmd_pr_start "${1:-}" ;;
-        *)     echo "Unknown pr verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
+        review) cmd_pr_review "${1:-}" ;;
+        *)      echo "Unknown pr verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
     esac
 }
 
@@ -1045,7 +1043,7 @@ case "$noun" in
     browser)        dispatch_browser "$@" ;;
     sdk)            dispatch_sdk "$@" ;;
     diff)           dispatch_diff "$@" ;;
-    ticket)         dispatch_ticket "$@" ;;
+    issue)          dispatch_issue "$@" ;;
     pr)             dispatch_pr "$@" ;;
     setup)          cmd_worktree_setup "${1:-}" ;;
     help|-h|--help) cmd_help ;;

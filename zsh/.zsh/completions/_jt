@@ -19,7 +19,7 @@ _jt() {
                 browser)     _jt_browser ;;
                 sdk)         _jt_sdk ;;
                 diff)        _jt_diff ;;
-                ticket)      _jt_ticket ;;
+                issue)       _jt_issue ;;
                 pr)          _jt_pr ;;
                 setup)       _jt_branches_or_path ;;
             esac
@@ -37,7 +37,7 @@ _jt_nouns() {
         'browser:agent browser'
         'sdk:SDK generation'
         'diff:PR-style local diff viewer in cmux'
-        'ticket:start work from a GitHub issue'
+        'issue:start work from a GitHub issue'
         'pr:review an existing pull request'
         'setup:run setup in current dir (alias for worktree setup)'
         'help:show help'
@@ -191,12 +191,12 @@ _jt_sdk() {
     _describe 'verb' verbs
 }
 
-_jt_ticket() {
+_jt_issue() {
     local context state state_descr line
     typeset -A opt_args
 
     _arguments -C \
-        '1: :_jt_ticket_verbs' \
+        '1: :_jt_issue_verbs' \
         '*::arg:->arg'
 
     case $state in
@@ -208,7 +208,7 @@ _jt_ticket() {
     esac
 }
 
-_jt_ticket_verbs() {
+_jt_issue_verbs() {
     local -a verbs
     verbs=(
         'start:create worktree+branch from a GitHub issue and launch an agent'
@@ -226,7 +226,7 @@ _jt_pr() {
 
     case $state in
         arg)
-            if [[ $line[1] == start ]]; then
+            if [[ $line[1] == review ]]; then
                 _message 'GitHub PR URL or number'
             fi
             ;;
@@ -236,7 +236,7 @@ _jt_pr() {
 _jt_pr_verbs() {
     local -a verbs
     verbs=(
-        'start:check out a PR branch into a worktree and launch an agent to review it'
+        'review:check out a PR branch into a worktree and launch /code-review'
     )
     _describe 'verb' verbs
 }
