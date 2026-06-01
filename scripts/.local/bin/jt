@@ -600,8 +600,8 @@ cmd_app_run() {
 
     echo ""
     echo "Starting services..."
-    echo "  Backend:  http://localhost:8000"
     echo "  Frontend: http://localhost:5173"
+    echo "  Backend:  http://localhost:8000"
     echo ""
 
     trap 'echo ""; echo "Stopping services..."; kill 0' INT TERM
