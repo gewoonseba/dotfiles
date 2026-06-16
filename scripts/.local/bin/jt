@@ -4,8 +4,13 @@ set -euo pipefail
 # jt — Jolteon worktree & service manager
 # See: jt help
 
-REPO="$HOME/Work/jolteon"
-WORKSPACE="$HOME/Work/workspaces/jolteon"
+# Base work dir — tolerate Work/work casing across machines. macOS's filesystem
+# is case-insensitive (so lowercase resolves a "Work" dir), and WSL/Linux here
+# uses lowercase "work". Prefer lowercase; fall back to capital for any
+# case-sensitive box that uses "Work".
+WORK="$HOME/work"; [ -d "$WORK" ] || WORK="$HOME/Work"
+REPO="$WORK/jolteon"
+WORKSPACE="$WORK/workspaces/jolteon"
 
 # Prefer system-installed Python (e.g. Homebrew) over uv-managed downloads
 export UV_PYTHON_PREFERENCE=system
@@ -768,7 +773,7 @@ cmd_mcp_stop() {
 cmd_browser_open() {
     local profile="${1:-}"
     local url="${2:-http://localhost:5173}"
-    local profiles_dir="$HOME/Work/browser-profiles"
+    local profiles_dir="$WORK/browser-profiles"
 
     if [ -z "$profile" ]; then
         echo "Usage: jt browser open <profile> [url]"
