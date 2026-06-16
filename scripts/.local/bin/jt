@@ -647,7 +647,20 @@ cmd_app_stop() {
 
     if [ "$killed" -eq 0 ]; then
         echo "No services running."
+        return 0
     fi
+
+    # kill -9 is asynchronous: the kernel may not have released the ports yet.
+    # Wait until they're actually free so an immediately-following 'jt app run'
+    # (e.g. when switching worktrees) doesn't lose the bind race — uvicorn won't
+    # rebind a busy port and exits, leaving the backend dead on the first try.
+    local port i
+    for port in 8000 5173; do
+        for i in $(seq 1 50); do
+            lsof -ti :"$port" >/dev/null 2>&1 || break
+            sleep 0.1
+        done
+    done
 }
 
 # Open an SSH tunnel that forwards the app's dev ports from the remote box to
