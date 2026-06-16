@@ -695,6 +695,43 @@ cmd_app_forward() {
     exec ssh -N "${fwd[@]}" "$host"
 }
 
+# Serve a directory (default: the worktree's root .context folder — plans, docs,
+# agent-generated HTML) over HTTP, bound to all interfaces so it's reachable from
+# another machine on the tailnet (e.g. open http://pc-seba-1:8090/ on your Mac).
+# Static files only, so no SSH tunnel is needed. Pass a dir and/or --port to override.
+cmd_docs_serve() {
+    local port="8090" dir=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --port) port="${2:-}"; [ -z "$port" ] && { echo "--port needs a value"; exit 1; }; shift 2 ;;
+            *)      dir="$1"; shift ;;
+        esac
+    done
+
+    if [ -z "$dir" ]; then
+        local root
+        root="$(git rev-parse --show-toplevel 2>/dev/null)" \
+            || { echo "Not in a git worktree — pass a directory: jt docs serve <dir>"; exit 1; }
+        dir="$root/.context"
+    fi
+    [ -d "$dir" ] || { echo "Nothing to serve: $dir does not exist"; exit 1; }
+
+    # Free the port so re-running 'jt serve' just works.
+    local pids
+    pids=$(lsof -ti :"$port" 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+        echo "$pids" | xargs kill -9 2>/dev/null || true
+        sleep 0.3
+    fi
+
+    echo "Serving $dir at:"
+    echo "  http://pc-seba-1:$port/   <- open this on your Mac (over Tailscale)"
+    echo "  http://localhost:$port/   (on this box)"
+    echo "Ctrl+C to stop."
+    echo ""
+    exec python3 -m http.server "$port" --bind 0.0.0.0 --directory "$dir"
+}
+
 # ─── MCP commands ──────────────────────────────────────────
 
 cmd_mcp_run() {
@@ -979,6 +1016,10 @@ Diff (PR-style local diff viewer in cmux):
   jt diff open [--base <branch>]       Open diffhub in a cmux browser split
   jt diff stop                         Stop any running diffhub process
 
+Docs (view plans/docs from another machine, e.g. your Mac):
+  jt docs serve [dir] [--port N]       Serve the worktree's .context folder over HTTP
+                                       (default port 8090); open http://pc-seba-1:<port>/
+
 Shortcuts:
   jt setup [branch|path]               Alias for 'jt worktree setup' (default: cwd)
 
@@ -1001,6 +1042,7 @@ Examples:
   jt browser open root http://localhost:5173/admin
   jt diff open
   jt diff open --base main
+  jt docs serve
 HELP
 }
 
@@ -1091,6 +1133,15 @@ dispatch_diff() {
     esac
 }
 
+dispatch_docs() {
+    local verb="${1:-}"
+    shift 2>/dev/null || true
+    case "$verb" in
+        serve) cmd_docs_serve "$@" ;;
+        *)     echo "Unknown docs verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
+    esac
+}
+
 noun="${1:-help}"
 shift 2>/dev/null || true
 case "$noun" in
@@ -1103,6 +1154,7 @@ case "$noun" in
     issue)          dispatch_issue "$@" ;;
     pr)             dispatch_pr "$@" ;;
     setup)          cmd_worktree_setup "${1:-}" ;;
+    docs)           dispatch_docs "$@" ;;
     help|-h|--help) cmd_help ;;
     *)              echo "Unknown command: $noun"; echo "Run 'jt help' for usage."; exit 1 ;;
 esac

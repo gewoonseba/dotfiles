@@ -22,6 +22,7 @@ _jt() {
                 issue)       _jt_issue ;;
                 pr)          _jt_pr ;;
                 setup)       _jt_branches_or_path ;;
+                docs)        _jt_docs ;;
             esac
             ;;
     esac
@@ -40,6 +41,7 @@ _jt_nouns() {
         'issue:start work from a GitHub issue'
         'pr:review an existing pull request'
         'setup:run setup in current dir (alias for worktree setup)'
+        'docs:serve plans/docs (.context) over HTTP for viewing from another machine'
         'help:show help'
     )
     _describe 'noun' nouns
@@ -265,6 +267,33 @@ _jt_diff_verbs() {
     verbs=(
         'open:open diffhub in a cmux browser split'
         'stop:stop any running diffhub process'
+    )
+    _describe 'verb' verbs
+}
+
+_jt_docs() {
+    local context state state_descr line
+    typeset -A opt_args
+
+    _arguments -C \
+        '1: :_jt_docs_verbs' \
+        '*::arg:->arg'
+
+    case $state in
+        arg)
+            if [[ $line[1] == serve ]]; then
+                _arguments \
+                    '--port[port number]:port:' \
+                    '*:directory:_files -/'
+            fi
+            ;;
+    esac
+}
+
+_jt_docs_verbs() {
+    local -a verbs
+    verbs=(
+        'serve:serve the .context folder over HTTP'
     )
     _describe 'verb' verbs
 }
