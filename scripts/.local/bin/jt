@@ -606,6 +606,9 @@ cmd_app_run() {
     echo "  Frontend: http://localhost:5173"
     echo "  Backend:  http://localhost:8000"
     echo ""
+    echo "Viewing from another machine (e.g. your Mac)? Run 'jt app forward' there"
+    echo "to tunnel these ports, then open the URLs above."
+    echo ""
 
     trap 'echo ""; echo "Stopping services..."; kill 0' INT TERM
 
@@ -645,6 +648,38 @@ cmd_app_stop() {
     if [ "$killed" -eq 0 ]; then
         echo "No services running."
     fi
+}
+
+# Open an SSH tunnel that forwards the app's dev ports from the remote box to
+# this machine, so servers started with 'jt app run' over there are reachable
+# at localhost here. Run this on your local machine (e.g. your Mac). Relies on a
+# 'Host wsl' entry in ~/.ssh/config for the connection (host, port, user, key).
+cmd_app_forward() {
+    local host="wsl"
+    local -a ports=(5173 8000 8002)
+
+    # SSH can't bind a local port that's already taken; warn before connecting.
+    local -a busy=()
+    local p
+    for p in "${ports[@]}"; do
+        lsof -ti :"$p" >/dev/null 2>&1 && busy+=("$p")
+    done
+    if [ ${#busy[@]} -gt 0 ]; then
+        echo "Local ports already in use: ${busy[*]}"
+        echo "If the app is running locally, stop it first ('jt app stop') so the"
+        echo "box can serve it instead — otherwise those forwards will fail to bind."
+        echo ""
+    fi
+
+    local -a fwd=()
+    for p in "${ports[@]}"; do
+        fwd+=(-L "$p:localhost:$p")
+    done
+
+    echo "Forwarding ${ports[*]} from '$host' -> localhost. Leave running (Ctrl+C to stop)."
+    echo "Then open http://localhost:5173"
+    echo ""
+    exec ssh -N "${fwd[@]}" "$host"
 }
 
 # ─── MCP commands ──────────────────────────────────────────
@@ -913,6 +948,8 @@ PR (review an existing pull request):
 App (backend + frontend):
   jt app run [--lcl|--dev|--prd]       Start backend + frontend (default: lcl)
   jt app stop                          Stop backend + frontend
+  jt app forward                       SSH-tunnel the box's dev ports (5173/8000/8002)
+                                       to localhost on this machine (run on your Mac)
 
 MCP:
   jt mcp run [--lcl|--dev|--prd] [--port N]   Start MCP service (default: --dev, port 8002)
@@ -944,6 +981,7 @@ Examples:
   jt worktree checkout feat/partner-portal-v1
   jt wt open feat/battery-charts
   jt app run --prd
+  jt app forward
   jt mcp run --dev
   jt mcp run --prd --port 9000
   jt browser open customer
@@ -976,8 +1014,9 @@ dispatch_app() {
     local verb="${1:-}"
     shift 2>/dev/null || true
     case "$verb" in
-        run)  cmd_app_run "$@" ;;
-        stop) cmd_app_stop ;;
+        run)                cmd_app_run "$@" ;;
+        stop)               cmd_app_stop ;;
+        forward|fwd|tunnel) cmd_app_forward ;;
         *)    echo "Unknown app verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
     esac
 }

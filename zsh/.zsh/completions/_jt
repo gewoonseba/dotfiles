@@ -113,6 +113,7 @@ _jt_app_verbs() {
     verbs=(
         'run:start backend + frontend'
         'stop:stop backend + frontend'
+        'forward:SSH-tunnel the box dev ports to localhost (run on your Mac)'
     )
     _describe 'verb' verbs
 }
