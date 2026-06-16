@@ -14,6 +14,9 @@ if command -v eza &> /dev/null; then
   alias lta='lt -a'
 fi
 
+# Ubuntu ships bat's binary as `batcat`; alias it so `bat` (and `ff` below) work everywhere
+command -v bat &> /dev/null || { command -v batcat &> /dev/null && alias bat='batcat'; }
+
 alias ff="fzf --preview 'bat --style=numbers --color=always {}'"
 
 if command -v zoxide &> /dev/null; then
@@ -30,7 +33,16 @@ if command -v zoxide &> /dev/null; then
 fi
 
 open() {
-  xdg-open "$@" >/dev/null 2>&1 &
+  if [ -n "$WSL_DISTRO_NAME" ] || grep -qi microsoft /proc/version 2>/dev/null; then
+    # WSL: hand off to the Windows host so files/URLs open in Windows apps
+    if command -v wslview &> /dev/null; then
+      wslview "$@"
+    else
+      explorer.exe "$@" 2>/dev/null
+    fi
+  else
+    xdg-open "$@" >/dev/null 2>&1 &
+  fi
 }
 
 # Directories

@@ -9,6 +9,11 @@ DOTFILES_DIR=$(cd "$(dirname "$SCRIPT_PATH")/../../../" && pwd)
 SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 cd "$DOTFILES_DIR"
 
+# True when running inside Windows Subsystem for Linux
+is_wsl() {
+    [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null
+}
+
 echo "󰒓 Master Setup from $DOTFILES_DIR"
 
 # --- Bootstrap: ensure baseline dependencies are installed ---
@@ -53,11 +58,18 @@ install_pkgs() {
 }
 
 bootstrap_deps() {
-    # Baseline tools available in every package manager
+    # Baseline CLI tools — same package name across apt/brew/pacman.
     local pkg_missing=()
-    for cmd in curl stow fzf; do
+    for cmd in curl stow fzf jq zsh eza; do
         command -v "$cmd" &> /dev/null || pkg_missing+=("$cmd")
     done
+    # bat: Ubuntu ships the binary as `batcat` (.zshrc aliases it), so only
+    # install the `bat` package if neither name is present.
+    { command -v bat &> /dev/null || command -v batcat &> /dev/null; } || pkg_missing+=("bat")
+    # WSL: wslu provides `wslview` so `open` can hand files/URLs to Windows.
+    if is_wsl && ! command -v wslview &> /dev/null; then
+        pkg_missing+=("wslu")
+    fi
     if [ ${#pkg_missing[@]} -gt 0 ]; then
         echo "󰇚 Installing baseline packages: ${pkg_missing[*]}"
         install_pkgs "${pkg_missing[@]}"
@@ -75,7 +87,34 @@ bootstrap_deps() {
     fi
 }
 
+# Make zsh the login shell — these dotfiles are zsh-centric.
+ensure_login_shell_zsh() {
+    local zsh_path
+    zsh_path="$(command -v zsh)" || return 0
+
+    local current="${SHELL:-}"
+    if command -v getent &> /dev/null; then
+        current="$(getent passwd "$USER" | awk -F: '{print $NF}')"
+    fi
+    case "$current" in
+        */zsh) return 0 ;;  # already zsh
+    esac
+
+    echo "󰒓 zsh is installed but isn't your login shell ($current)."
+    read -p "  Set zsh as your default shell? [Y/n] " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        grep -qxF "$zsh_path" /etc/shells 2>/dev/null || echo "$zsh_path" | sudo tee -a /etc/shells > /dev/null
+        if chsh -s "$zsh_path"; then
+            echo "  󰄬 Default shell set to zsh (takes effect on next login)"
+        else
+            echo "  ⚠ chsh failed — set it manually: chsh -s $zsh_path"
+        fi
+    fi
+}
+
 bootstrap_deps
+ensure_login_shell_zsh
 
 # Available tools — order here is the install order
 # Format: "<script-name>|<description>"
@@ -142,7 +181,6 @@ done
 # --- Global Stow ---
 echo ""
 echo "󰛢 Stowing configurations..."
-
 # Ensure stow ignores macOS junk etc. Stow only reads .stow-global-ignore
 # from $HOME, so symlink the repo's version there if it isn't already.
 if [ ! -e "$HOME/.stow-global-ignore" ]; then
@@ -150,7 +188,19 @@ if [ ! -e "$HOME/.stow-global-ignore" ]; then
     echo "  󰄬 Linked .stow-global-ignore → \$HOME"
 fi
 
-STOW_FOLDERS="xremap scripts"
+# Core, headless-safe configs stowed on every platform. Desktop-only folders
+# (ghostty, hypr, cursor*, zed) can't run headless and are excluded on WSL —
+# editing is done from the Windows host (e.g. Cursor/VS Code over Remote-WSL).
+# Skills are handled separately by the agents-sync-skills step below.
+STOW_FOLDERS="zsh starship claude scripts"
+
+# ~/.claude holds live runtime state (credentials, history). Stowing claude only
+# folds in settings.json and leaves runtime files alone. Back up a pre-existing
+# *real* settings.json so `stow claude` won't abort on a conflict.
+if [ -f "$HOME/.claude/settings.json" ] && [ ! -L "$HOME/.claude/settings.json" ]; then
+    echo "  Backing up existing ~/.claude/settings.json → settings.json.pre-stow.bak"
+    mv "$HOME/.claude/settings.json" "$HOME/.claude/settings.json.pre-stow.bak"
+fi
 
 for folder in $STOW_FOLDERS; do
     if [ -d "$folder" ]; then

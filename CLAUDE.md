@@ -54,6 +54,18 @@ stow -D folder-name       # Remove symlinks (destow)
 
 - **Linux**: Use `yay` over `pacman` or other package managers whenever possible
 - **macOS**: Platform-specific configs go in separate folders (e.g., `cursor-macos/`)
+- **WSL (Ubuntu)**: `setup` detects WSL (via `is_wsl`) and tailors itself for a headless install:
+  - **Stows only the headless-safe set**: `zsh starship claude scripts`. Desktop-only folders
+    (`ghostty`, `hypr`, `cursor*`, `zed`) are excluded — edit from the Windows host (e.g.
+    Cursor/VS Code over Remote-WSL). The `gamemode-install` / `photo-backup` scripts are
+    Arch-gaming / macOS-`/Volumes` only and never run here.
+  - **Installs `wslu`** so the `open` function (in `zsh/.zshrc`) routes files/URLs to the Windows
+    host via `wslview` (falling back to `explorer.exe`); native Linux/macOS still use `xdg-open`.
+  - **Ensures zsh is the login shell** (prompts for `chsh`) and installs baseline CLI tools
+    (`jq`, `eza`, `bat` — aliased from `batcat` on Ubuntu, etc.).
+  - **Protects `~/.claude`**: a pre-existing real `settings.json` is backed up to
+    `settings.json.pre-stow.bak` before stowing; live runtime files (credentials, history) are
+    never touched.
 
 ## Tool Configurations
 
