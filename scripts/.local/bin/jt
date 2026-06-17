@@ -30,7 +30,7 @@ setup_worktree_fast() {
     local target_dir="$1"
 
     echo "Copying environment files..."
-    (cd "$REPO" && find . \( -name node_modules -o -name .venv -o -name .git -o -name .data \) -prune -o -name '.env' -print) | while read -r envfile; do
+    (cd "$REPO" && find . \( -name node_modules -o -name .venv -o -name .git -o -name .data -o -name .emdash \) -prune -o -name '.env' -print) | while read -r envfile; do
         if [ -f "$REPO/$envfile" ]; then
             mkdir -p "$target_dir/$(dirname "$envfile")"
             cp "$REPO/$envfile" "$target_dir/$envfile"
