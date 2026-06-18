@@ -610,7 +610,10 @@ cmd_app_run() {
     echo "to tunnel these ports, then open the URLs above."
     echo ""
 
-    trap 'echo ""; echo "Stopping services..."; kill 0' INT TERM
+    # Disarm the trap before 'kill 0': that signals our own process group with
+    # SIGTERM, and a still-armed TERM trap would re-run this handler, re-signal,
+    # and loop — flooding the terminal with "Stopping services...".
+    trap 'trap - INT TERM; echo ""; echo "Stopping services..."; kill 0' INT TERM
 
     (cd services/dashboard-api 2>/dev/null || cd "$REPO/services/dashboard-api"
      uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload) &
