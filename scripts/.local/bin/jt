@@ -24,8 +24,9 @@ hint_worktree() {
 
 trap 'hint_worktree' ERR
 
-# Fast bits (~1s): env files + CLAUDE.md + .claude/.cursor/.vscode. These must
-# exist before an AI agent starts so it sees the full worktree.
+# Fast bits (~1s): env files + CLAUDE.md + .claude/.cursor/.vscode +
+# .compound-engineering. These must exist before an AI agent starts so it
+# sees the full worktree.
 setup_worktree_fast() {
     local target_dir="$1"
 
@@ -42,8 +43,11 @@ setup_worktree_fast() {
         echo "  copied CLAUDE.md"
     fi
 
+    # .compound-engineering is fully gitignored (machine-local CE config), so it
+    # won't arrive in a worktree created from origin/main — copy it across like
+    # .claude so CE behaves the same in every worktree.
     local d
-    for d in .claude .cursor .vscode; do
+    for d in .claude .cursor .vscode .compound-engineering; do
         if [ -d "$REPO/$d" ] && [ ! -d "$target_dir/$d" ]; then
             cp -r "$REPO/$d" "$target_dir/$d"
             echo "  copied $d/"
