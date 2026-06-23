@@ -46,7 +46,8 @@
     "conversation-search@cc-conversation-search": true,
     "figma@claude-plugins-official": true,
     "paper-desktop@paper": true,
-    "chrome-devtools-mcp@chrome-devtools-plugins": true
+    "chrome-devtools-mcp@chrome-devtools-plugins": true,
+    "compound-engineering@compound-engineering-plugin": true
   },
   "extraKnownMarketplaces": {
     "cc-conversation-search": {
@@ -71,6 +72,12 @@
       "source": {
         "source": "github",
         "repo": "ChromeDevTools/chrome-devtools-mcp"
+      }
+    },
+    "compound-engineering-plugin": {
+      "source": {
+        "source": "github",
+        "repo": "EveryInc/compound-engineering-plugin"
       }
     }
   },
