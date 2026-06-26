@@ -59,7 +59,7 @@ Use the boilerplate at `template.html` (next to this `SKILL.md`) as the starting
 Artifact-ready, content-only fragment (a `<title>`, an inline `<style>`, then the page content —
 no `<html>`/`<head>`/`<body>` wrapper). It already provides:
 
-- Light theme with the project's typography conventions
+- Light theme pre-themed to the Companion design language (see *Match the design language*)
 - Title block (eyebrow / h1 / lede)
 - Sticky-feeling table-of-contents box at the top
 - Section headings (`h2` with bottom border, `h3`, `h4`)
@@ -72,6 +72,32 @@ no `<html>`/`<head>`/`<body>` wrapper). It already provides:
 - A `colophon` footer for cross-references
 
 Read it, drop in the content, save. Do not invent new visual primitives unless the content really requires them; if you do add classes, follow the existing naming and colour variables.
+
+## Match the design language
+
+Ground the document's look in a real design system instead of inventing a palette:
+
+1. **Prefer the current repo's design doc.** Look for a `DESIGN.md` / `design.md` at the repo
+   root or under `docs/`. If one exists, read it and remap the template's `:root` variables (and
+   the intent tints) to its tokens so the doc looks native to that project.
+2. **Otherwise use the bundled Companion design language** — `companion-design.md` next to this
+   `SKILL.md` (a snapshot of the Companion.energy design system). `template.html` already ships
+   themed to it, so the **default output is already on-brand** — no extra work needed.
+
+When a repo `DESIGN.md` is present, translate its foundation onto the template variables:
+
+| Design token (DESIGN.md) | Template variable |
+|---|---|
+| text primary / secondary | `--fg` / `--muted` |
+| surface / inset | `--bg` / `--bg-soft` (+ `--code-bg`) |
+| border | `--border` |
+| brand / brand-soft | `--accent` / `--accent-soft` |
+| success / warning / danger (600) | `--good` / `--warn` / `--bad` |
+| radius sm / md / lg | the 4 / 6 / 8px radii the template already uses |
+
+Take only the **foundation** — colour, type scale, surfaces, radii. Don't transcribe app-only
+mechanics (Tailwind utilities, the `state-layer` overlay, ECharts chart colours) into a static
+HTML doc; they don't apply.
 
 ## Structure (default — adapt to the content)
 
