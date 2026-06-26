@@ -47,7 +47,8 @@
     "figma@claude-plugins-official": true,
     "paper-desktop@paper": true,
     "chrome-devtools-mcp@chrome-devtools-plugins": true,
-    "compound-engineering@compound-engineering-plugin": true
+    "compound-engineering@compound-engineering-plugin": true,
+    "vercel@claude-plugins-official": true
   },
   "extraKnownMarketplaces": {
     "cc-conversation-search": {
@@ -78,6 +79,12 @@
       "source": {
         "source": "github",
         "repo": "EveryInc/compound-engineering-plugin"
+      }
+    },
+    "claude-plugins-official": {
+      "source": {
+        "source": "github",
+        "repo": "anthropics/claude-plugins-official"
       }
     }
   },

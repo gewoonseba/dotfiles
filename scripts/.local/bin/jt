@@ -635,33 +635,37 @@ cmd_app_run() {
 }
 
 cmd_app_stop() {
-    local killed=0
+    local cur_pgid port pid pgid i pgids=""
+    cur_pgid=$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')
 
-    local pids
-    pids=$(lsof -ti :8000 2>/dev/null || true)
-    if [ -n "$pids" ]; then
-        echo "$pids" | xargs kill -9 2>/dev/null || true
-        echo "Stopped backend (port 8000)"
-        killed=1
-    fi
+    # Collect the process GROUPS that own the dev ports, then kill whole groups —
+    # not just the port-holding PIDs. 'jt app run' launches everything (uv-run +
+    # uvicorn --reload + its worker + vite) in one process group, and the uvicorn
+    # --reload supervisor does NOT itself hold the port. Killing only the port
+    # holder leaves the supervisor alive to respawn its worker, so the port never
+    # frees and the next 'jt app run' can't bind it (the "works on the 2nd try"
+    # bug). Killing the group takes the supervisor down too. Skip our own group so
+    # we never kill the in-progress 'jt app run' that called this.
+    for port in 8000 5173; do
+        for pid in $(lsof -ti :"$port" 2>/dev/null); do
+            pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')
+            [ -n "$pgid" ] && [ "$pgid" != "$cur_pgid" ] && pgids="$pgids $pgid"
+        done
+    done
+    pgids=$(printf '%s\n' $pgids | sort -u)
 
-    pids=$(lsof -ti :5173 2>/dev/null || true)
-    if [ -n "$pids" ]; then
-        echo "$pids" | xargs kill -9 2>/dev/null || true
-        echo "Stopped frontend (port 5173)"
-        killed=1
-    fi
-
-    if [ "$killed" -eq 0 ]; then
+    if [ -z "$pgids" ]; then
         echo "No services running."
         return 0
     fi
 
-    # kill -9 is asynchronous: the kernel may not have released the ports yet.
-    # Wait until they're actually free so an immediately-following 'jt app run'
-    # (e.g. when switching worktrees) doesn't lose the bind race — uvicorn won't
-    # rebind a busy port and exits, leaving the backend dead on the first try.
-    local port i
+    for pgid in $pgids; do
+        kill -9 -"$pgid" 2>/dev/null || true
+    done
+    echo "Stopped services (backend + frontend)"
+
+    # Wait for the kernel to actually release the ports before returning, so the
+    # following 'jt app run' binds cleanly.
     for port in 8000 5173; do
         for i in $(seq 1 50); do
             lsof -ti :"$port" >/dev/null 2>&1 || break
