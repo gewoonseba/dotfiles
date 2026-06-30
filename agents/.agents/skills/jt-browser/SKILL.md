@@ -2,8 +2,7 @@
 name: jt-browser
 description: >
   Browse the web, interact with web pages, fill forms, click buttons, take screenshots, and extract
-  information from websites. Supports browser profiles (root, partner, customer) for different user
-  contexts — specify as argument e.g. "/browser customer". Use this skill whenever the user asks to
+  information from websites. Use this skill whenever the user asks to
   open a URL, navigate a website, scrape content, fill out a form, test a web page, take a screenshot,
   or perform any browser-based task. Also trigger when the user says "go to", "open this page",
   "check this site", "screenshot", "fill this form", "click on", or references interacting with a
@@ -17,21 +16,38 @@ You have access to the `agent-browser` CLI tool for all browser automation. Use 
 
 ---
 
-## Browser Profiles
+## Personas & the local auth bypass
 
-Three browser profiles are available, each pre-authenticated as a different user type:
+For Jolteon UI work, the **active user/persona is chosen when the stack is started**, not in the
+browser. `jt app run --<env> --as <persona>` (e.g. `jt app run --dev --as partner`) starts the
+backend + frontend with WorkOS login bypassed and the chosen persona's identity, so the frontend
+skips the login screen entirely and the browser only has to open the app.
 
-| Profile      | `--profile` path                                              | Description                           |
-|-------------|---------------------------------------------------------------|---------------------------------------|
-| **root**     | `/Users/sebastianstoelen/Work/browser-profiles/root`         | Global admin (ROOT organization)      |
-| **partner**  | `/Users/sebastianstoelen/Work/browser-profiles/partner`      | Reseller / partner organization       |
-| **customer** | `/Users/sebastianstoelen/Work/browser-profiles/customer`     | End-customer organization             |
+Consequences for browser work:
 
-### Choosing a profile
+- **No pre-authenticated browser profiles are needed.** Open `http://localhost:5173` with a clean
+  (default or ephemeral) profile — you are already "logged in" as whatever persona the running stack
+  was started with. There are no longer per-user `--profile` directories to maintain.
+- **The browser cannot choose the persona.** The persona is fixed at process start; to validate a
+  different one, the stack must be restarted with a different `--as`. Never assume which persona is
+  live — confirm it with the pre-flight below.
+- A persistent `--profile` is only for the exception case of exercising the *real* WorkOS login flow
+  (no bypass). For normal local validation, skip it.
 
-- If the user specifies a profile (e.g., `/browser root`, "open as customer", "use the partner profile"), use that profile.
-- If the user does not specify a profile, **default to `root`**.
-- If the task requires testing multiple user perspectives, use separate sessions with different profiles.
+### Persona pre-flight (do this first)
+
+Before validating anything, confirm the stack is running as the persona you intend — a wrong-persona
+run silently validates the wrong thing. Query the backend and check the **DB-derived** identity
+fields. The bypass gives every persona the same placeholder email/name, so those do NOT distinguish
+personas — only these do:
+
+```bash
+curl -s http://localhost:8000/user/me | jq '{customer_id, organization_type, is_admin}'
+```
+
+Assert the result matches the intended persona (e.g. `partner` -> `organization_type` RESELLER,
+`is_admin` false; `root` -> `is_admin` true). If it does not match, **stop** and restart the stack
+with the correct `jt app run --as <persona>` — do not proceed with validation.
 
 ---
 
@@ -41,10 +57,11 @@ For any browser task, follow this pattern:
 
 ### 1. Open and wait for the page
 
-Always use `--profile` to reuse the authenticated browser session (replace `<profile>` with the chosen profile path):
+Open the app with a clean profile — no `--profile` needed, since the running stack already
+authenticates you via the bypass (see Personas above):
 
 ```bash
-agent-browser --profile /Users/sebastianstoelen/Work/browser-profiles/root open <url> && agent-browser wait --load networkidle
+agent-browser open <url> && agent-browser wait --load networkidle
 ```
 
 ### 2. Understand the page
@@ -149,7 +166,7 @@ agent-browser wait --load networkidle      # Wait for network to settle
 ### Navigation
 
 ```bash
-agent-browser --profile /Users/sebastianstoelen/Work/browser-profiles/root open <url>  # Navigate to URL (with persistent session)
+agent-browser open <url>                              # Navigate to URL
 agent-browser back                                    # Go back
 agent-browser forward                                 # Go forward
 agent-browser reload                                  # Reload page
@@ -196,13 +213,15 @@ agent-browser network requests --filter "api"  # Filter by pattern
 
 ### Authentication persistence
 
-Each profile directory persists cookies, localStorage, and all browser state across sessions. Login once per profile and all future runs with that profile are authenticated.
+For normal Jolteon work you do not log in at all — the `jt app run --as <persona>` bypass loads the
+app already authenticated, so a clean profile needs no persisted session.
 
-To re-login if a session expires:
+The only time a persistent profile helps is the exception case of exercising the **real** WorkOS
+login flow (no bypass). For that, pass a `--profile` directory of your choosing — it persists cookies
+and localStorage across runs — and log in once headed:
+
 ```bash
-agent-browser --profile /Users/sebastianstoelen/Work/browser-profiles/root --headed open <login-url>
-agent-browser --profile /Users/sebastianstoelen/Work/browser-profiles/partner --headed open <login-url>
-agent-browser --profile /Users/sebastianstoelen/Work/browser-profiles/customer --headed open <login-url>
+agent-browser --profile "$WORK/browser-profiles/real-login" --headed open <login-url>
 ```
 
 ---
