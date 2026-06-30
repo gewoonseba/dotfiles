@@ -147,12 +147,22 @@ post_create_worktree() {
 # Parse --lcl/--dev/--prd flags into $ENV_CHOICE. Unknown args go to $REMAINING_ARGS.
 parse_env_flag() {
     ENV_CHOICE=""
+    PERSONA=""
     REMAINING_ARGS=()
     while [ $# -gt 0 ]; do
         case "$1" in
             --lcl) ENV_CHOICE="lcl"; shift ;;
             --dev) ENV_CHOICE="dev"; shift ;;
             --prd) ENV_CHOICE="prd"; shift ;;
+            --as)
+                # --as <persona>; a bare --as (or one followed by another flag)
+                # defaults to root.
+                if [ -n "${2:-}" ] && [ "${2#--}" = "$2" ]; then
+                    PERSONA="$2"; shift 2
+                else
+                    PERSONA="root"; shift
+                fi
+                ;;
             *)     REMAINING_ARGS+=("$1"); shift ;;
         esac
     done
@@ -578,7 +588,7 @@ cmd_app_run() {
     local env="$ENV_CHOICE"
     if [ ${#REMAINING_ARGS[@]} -gt 0 ]; then
         echo "Unknown argument: ${REMAINING_ARGS[0]}"
-        echo "Usage: jt app run [--lcl|--dev|--prd]"
+        echo "Usage: jt app run [--lcl|--dev|--prd] [--as <persona>]"
         exit 1
     fi
 
@@ -605,6 +615,24 @@ cmd_app_run() {
         prd) env_prd ;;
     esac
 
+    # Persona override (auth bypass), layered on top of the env above so it wins
+    # over whatever identity that env bundled. resolve_persona (in environments.sh)
+    # errors on an undefined (env, persona) combo — abort rather than start as the
+    # wrong / a non-existent user.
+    if [ -n "${PERSONA:-}" ]; then
+        resolve_persona "$env" "$PERSONA" || {
+            echo "Aborting: persona '$PERSONA' is not defined for env '$env' in $env_file."
+            exit 1
+        }
+    fi
+
+    # Whenever the bypass is on (a persona, or env_prd), pin COMPANION_ENV=local so
+    # the backend's DISABLE_AUTH gate activates and its startup assert is satisfied,
+    # independent of which DB the env flag selected.
+    if [ "${DISABLE_AUTH_RAW:-}" = "true" ]; then
+        export COMPANION_ENV=local
+    fi
+
     echo ""
     echo "Starting services..."
     echo "  Frontend: http://localhost:5173"
@@ -620,11 +648,15 @@ cmd_app_run() {
     trap 'trap - INT TERM; echo ""; echo "Stopping services..."; kill 0' INT TERM
 
     (cd services/dashboard-api 2>/dev/null || cd "$REPO/services/dashboard-api"
-     uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload) &
+     uv run uvicorn app.main:app --host 0.0.0.0 --port 8000) &
 
     local vite_env=""
     if [ "${DISABLE_AUTH_RAW:-}" = "true" ]; then
-        vite_env="VITE_DISABLE_AUTH=true"
+        # Pass both: VITE_DISABLE_AUTH activates the frontend bypass, and
+        # VITE_COMPANION_ENV=local makes env.ts select localConfig explicitly
+        # (the only config object carrying DISABLE_AUTH) instead of relying on
+        # the unset-fallback. Setting only one of the pair causes a sign-out loop.
+        vite_env="VITE_DISABLE_AUTH=true VITE_COMPANION_ENV=local"
     fi
     (cd services/frontend 2>/dev/null || cd "$REPO/services/frontend"
      env $vite_env npm run dev) &
@@ -1007,7 +1039,11 @@ PR (review an existing pull request):
                                        the initial prompt
 
 App (backend + frontend):
-  jt app run [--lcl|--dev|--prd]       Start backend + frontend (default: lcl)
+  jt app run [--lcl|--dev|--prd] [--as <persona>]
+                                       Start backend + frontend (default: lcl).
+                                       --as <persona> bypasses login as that persona
+                                       (root/partner/customer/…, defined in
+                                       ~/.config/jt/environments.sh) against the env's DB.
   jt app stop                          Stop backend + frontend
   jt app forward                       SSH-tunnel the box's dev ports (5173/8000/8002)
                                        to localhost on this machine (run on your Mac)
@@ -1046,6 +1082,7 @@ Examples:
   jt worktree checkout feat/partner-portal-v1
   jt wt open feat/battery-charts
   jt app run --prd
+  jt app run --dev --as partner
   jt app forward
   jt mcp run --dev
   jt mcp run --prd --port 9000
