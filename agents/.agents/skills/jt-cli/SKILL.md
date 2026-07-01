@@ -3,7 +3,8 @@ name: jt-cli
 description: >
   Use when working in the jolteon repo (~/work/jolteon): creating or switching
   git worktrees, starting work from a GitHub issue or PR, running the
-  backend/frontend/MCP services, opening a browser, or generating the TS SDK via
+  backend/frontend/MCP services (including in auth-bypass mode via
+  `jt app run --as <persona>`), opening a browser, or generating the TS SDK via
   the `jt` CLI. Covers jt worktree, jt issue start, jt pr review, and jt
   app/mcp/browser/sdk/diff/docs.
 version: 1.0.0
@@ -68,13 +69,36 @@ jt worktree setup .      # blocking re-run of the full setup
 - `jt pr review <url|number>` — checks out the PR branch into a worktree and launches the agent with `/code-review`.
 
 ### Services & tooling
-- `jt app run [--lcl|--dev|--prd]` — start backend + frontend (default `--lcl`); `jt app stop`; `jt app forward` SSH-tunnels dev ports (5173/8000/8002) to localhost.
+- `jt app run [--lcl|--dev|--prd] [--as <persona>]` — start backend + frontend (default `--lcl`); `jt app stop`; `jt app forward` SSH-tunnels dev ports (5173/8000/8002) to localhost. `--as` enables auth bypass — see below.
 - `jt mcp run [--lcl|--dev|--prd] [--port N]` — start MCP service (default `--dev`, port 8002); `jt mcp stop [--port N]`.
 - `jt browser open <profile> [url]` — headed browser (default localhost:5173); `jt browser stop`.
 - `jt sdk generate` — regenerate the dashboard-api TypeScript SDK (dashboard-api must be running).
 - `jt diff open [--base <branch>]` / `jt diff stop` — PR-style local diff viewer.
 - `jt docs serve [dir] [--port N]` — serve a worktree's `.context` folder over HTTP.
 - `jt setup [branch|path]` — alias for `jt worktree setup`.
+
+## Auth bypass (`jt app run --as <persona>`)
+
+`--as <persona>` starts the stack with WorkOS login bypassed and a fixed identity, so the frontend
+skips the login screen and the browser opens the app already "logged in". It sets `VITE_DISABLE_AUTH`
+on the frontend and `DISABLE_AUTH` on the backend and pins `COMPANION_ENV=local` so the backend's
+bypass gate activates.
+
+- **Personas:** `root` (root org, admin), `partner` (RESELLER org, non-admin), `customer` (CUSTOMER
+  org, non-admin). A bare `--as` (no value) defaults to `root`.
+- **Env matters:** persona IDs are per-environment. Only **`--dev`** has real IDs configured today;
+  `--lcl` personas are `_REPLACE_` placeholders. An undefined `(env, persona)` combo aborts the run.
+- **Confirm which persona is live** (the bypass gives every persona the same placeholder email/name —
+  only DB-derived fields distinguish them):
+  ```bash
+  curl -s http://localhost:8000/users/me | jq '{customer_id, customer_name, is_admin, organization_type, role}'
+  ```
+  `root` → `organization_type` `ROOT`, `is_admin` `true`; `partner` → `RESELLER`; `customer` →
+  `CUSTOMER`. The persona is fixed at process start — to switch, `jt app stop` and re-run with a
+  different `--as`.
+- Persona definitions live in `~/.config/jt/environments.sh` (`resolve_persona`).
+
+For a full frontend QA run built on this bypass, see the **code-frontend-qa** skill.
 
 ## Pitfalls
 - Long-running services (`jt app run`, `jt mcp run`) don't return — background them / use a separate terminal and poll; don't block on them.
