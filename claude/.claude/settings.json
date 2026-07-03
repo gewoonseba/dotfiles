@@ -37,7 +37,6 @@
     ],
     "defaultMode": "auto"
   },
-  "model": "opus[1m]",
   "hooks": {},
   "statusLine": {
     "type": "command",
@@ -45,10 +44,7 @@
   },
   "enabledPlugins": {
     "conversation-search@cc-conversation-search": true,
-    "figma@claude-plugins-official": true,
     "paper-desktop@paper": true,
-    "chrome-devtools-mcp@chrome-devtools-plugins": true,
-    "compound-engineering@compound-engineering-plugin": true,
     "vercel@claude-plugins-official": true
   },
   "extraKnownMarketplaces": {
@@ -89,11 +85,12 @@
       }
     }
   },
-  "effortLevel": "xhigh",
+  "effortLevel": "high",
   "tui": "fullscreen",
   "skipDangerousModePermissionPrompt": true,
   "skipWorkflowUsageWarning": true,
   "theme": "light",
+  "autoCompactEnabled": true,
   "remoteControlAtStartup": true,
   "skipAutoPermissionPrompt": true
 }

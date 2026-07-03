@@ -157,3 +157,7 @@ jt() {
   rm -f "$cd_file" "$agent_file" "$prompt_file"
   return $rc
 }
+
+
+# Added by Antigravity CLI installer
+export PATH="/home/gewoonseba/.local/bin:$PATH"
