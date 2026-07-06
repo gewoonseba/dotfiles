@@ -52,6 +52,12 @@ stow -D folder-name       # Remove symlinks (destow)
 
 ### Platform-Specific Notes
 
+- **All platforms**: `setup` runs `ensure_ssh_maxsessions` — on any machine with `sshd` it
+  prompts to raise `MaxSessions` to `100` in `/etc/ssh/sshd_config` (default `10` is too low
+  for parallel-agent tools like emdash, which multiplex many channels — shells + sftp — over one
+  SSH connection). Idempotent: skips if an active `MaxSessions` line already exists. Needs sudo;
+  reloads sshd after. Note a running connection keeps the limit it opened with, so reconnect to
+  pick up the new value.
 - **Linux**: Use `yay` over `pacman` or other package managers whenever possible
 - **macOS**: Platform-specific configs go in separate folders (e.g., `cursor-macos/`)
 - **WSL (Ubuntu)**: `setup` detects WSL (via `is_wsl`) and tailors itself for a headless install:

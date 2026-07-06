@@ -113,8 +113,39 @@ ensure_login_shell_zsh() {
     fi
 }
 
+# Raise sshd's per-connection channel limit. Tools like emdash multiplex many
+# channels (shells + sftp) over a single SSH connection, one per parallel agent
+# task, so the default MaxSessions of 10 is quickly exhausted ("SSH channel
+# unavailable"). Idempotent: skips if an active MaxSessions line already exists.
+ensure_ssh_maxsessions() {
+    local conf=/etc/ssh/sshd_config
+    local want=100
+    [ -f "$conf" ] || return 0
+    { command -v sshd &> /dev/null || [ -x /usr/sbin/sshd ]; } || return 0
+
+    # Already set (uncommented) — leave whatever value is there.
+    grep -qE '^[[:space:]]*MaxSessions[[:space:]]+' "$conf" && return 0
+
+    echo "󰒓 sshd MaxSessions is unset (default 10) — too low for parallel-agent"
+    echo "  tools like emdash that open many channels per SSH connection."
+    read -p "  Set 'MaxSessions $want' in $conf? [Y/n] " -n 1 -r
+    echo
+    [[ $REPLY =~ ^[Nn]$ ]] && return 0
+
+    echo "MaxSessions $want" | sudo tee -a "$conf" > /dev/null
+    if sudo sshd -t; then
+        sudo systemctl reload ssh 2>/dev/null \
+            || sudo systemctl reload sshd 2>/dev/null \
+            || echo "  ⚠ Set MaxSessions $want, but couldn't reload sshd — reload it manually"
+        echo "  󰄬 MaxSessions set to $want"
+    else
+        echo "  ⚠ sshd config test failed — review $conf"
+    fi
+}
+
 bootstrap_deps
 ensure_login_shell_zsh
+ensure_ssh_maxsessions
 
 # Available tools — order here is the install order
 # Format: "<script-name>|<description>"
