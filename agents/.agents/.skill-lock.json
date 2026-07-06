@@ -8,7 +8,7 @@
       "skillPath": "skills/agent-browser/SKILL.md",
       "skillFolderHash": "9b31e495b887e4ca123960415eca69fc7e1bba28",
       "installedAt": "2026-06-23T07:15:02.667Z",
-      "updatedAt": "2026-06-23T07:15:02.667Z"
+      "updatedAt": "2026-07-06T12:49:25.993Z"
     },
     "ast-grep": {
       "source": "ast-grep/agent-skill",
@@ -46,6 +46,15 @@
       "skillFolderHash": "962eb7ef77f17e0bce530153d4fec2136c5fa061",
       "installedAt": "2026-07-04T12:13:26.002Z",
       "updatedAt": "2026-07-04T12:13:26.002Z"
+    },
+    "vercel-react-best-practices": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/vercel-labs/agent-skills.git",
+      "skillPath": "skills/react-best-practices/SKILL.md",
+      "skillFolderHash": "343db72180d05814949fef7d46be96b5c6ee86b3",
+      "installedAt": "2026-07-06T08:33:28.595Z",
+      "updatedAt": "2026-07-06T08:33:28.595Z"
     }
   },
   "dismissed": {
