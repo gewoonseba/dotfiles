@@ -91,6 +91,9 @@
   "skipWorkflowUsageWarning": true,
   "theme": "light",
   "editorMode": "normal",
+  "env": {
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "50"
+  },
   "autoCompactEnabled": true,
   "remoteControlAtStartup": true,
   "skipAutoPermissionPrompt": true
