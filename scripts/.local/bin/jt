@@ -88,6 +88,12 @@ exec_agent() {
     esac
 }
 
+# Locate the Zed binary — 'zed' on most installs, 'zeditor' on some Linux
+# packages. Echoes the resolved path; returns non-zero if neither is present.
+find_zed() {
+    command -v zed 2>/dev/null || command -v zeditor 2>/dev/null
+}
+
 post_create_worktree() {
     local worktree_dir="$1"
     local preamble="${2:-}"
@@ -109,19 +115,34 @@ post_create_worktree() {
     echo "Worktree ready at: $worktree_dir"
     echo "Dependencies installing in background (log: $log_file)"
     echo ""
-    echo "Open an AI agent?"
+    echo "Open the worktree in?"
     echo "  1) claude"
     echo "  2) codex"
     echo "  3) agy"
-    echo "  4) none"
-    read -rp "Choice [4]: " choice
+    echo "  4) zed"
+    echo "  5) none"
+    read -rp "Choice [5]: " choice
 
-    local agent=""
-    case "${choice:-4}" in
+    local agent="" open_zed=0
+    case "${choice:-5}" in
         1|claude) agent="claude" ;;
         2|codex)  agent="codex" ;;
         3|agy)    agent="agy" ;;
+        4|zed)    open_zed=1 ;;
     esac
+
+    # Zed is a GUI editor that returns immediately, so launch it here (detached)
+    # and let the cd still happen — you end up with the IDE open AND your shell in
+    # the worktree. Agents, by contrast, take over the terminal via the wrapper.
+    if [ "$open_zed" -eq 1 ]; then
+        local zed_cmd
+        if zed_cmd="$(find_zed)"; then
+            ("$zed_cmd" "$worktree_dir" >/dev/null 2>&1 &)
+            echo "Opening worktree in Zed..."
+        else
+            echo "zed/zeditor not found — skipping IDE launch."
+        fi
+    fi
 
     # Wrapper path: hand the agent (and any preamble) to the zsh function so it
     # runs in the user's real shell (after the cd). The wrapper handles the
@@ -460,7 +481,7 @@ cmd_worktree_edit() {
     fi
 
     local zed_cmd
-    zed_cmd="$(command -v zed 2>/dev/null || command -v zeditor 2>/dev/null)" || { echo "Error: zed/zeditor not found"; exit 1; }
+    zed_cmd="$(find_zed)" || { echo "Error: zed/zeditor not found"; exit 1; }
     "$zed_cmd" "$dir"
 }
 
@@ -775,6 +796,76 @@ cmd_docs_serve() {
     exec python3 -m http.server "$port" --bind 0.0.0.0 --directory "$dir"
 }
 
+# ─── Pulse commands ────────────────────────────────────────
+
+# Allow the locally-run frontend to fetch pulse-report blobs from the dev
+# Storage account in the browser.
+#
+# Why this is needed: dashboard-api hands the UI a *SAS URL* pointing straight
+# at https://<account>.blob.core.windows.net/..., and the browser fetches it
+# directly. That cross-origin request is blocked unless the Storage account
+# carries a CORS rule for the frontend's origin — so a valid SAS URL still
+# renders as an empty/broken report locally until this runs.
+#
+# Idempotent + self-contained: skips when a rule already allows the origin, and
+# reuses COMPANION_STORAGE_CONNECTION_STRING from services/dashboard-api/.env
+# (the same secret the backend authenticates with — mirrors how 'jt mcp run'
+# sources dashboard-api creds), so no separate 'az login' is required.
+cmd_pulse_cors() {
+    local origin="${1:-http://localhost:5173}"
+
+    command -v az >/dev/null 2>&1 || {
+        echo "Error: the Azure CLI ('az') is required for 'jt pulse cors'."
+        exit 1
+    }
+
+    # Prefer the current worktree's .env, fall back to the main checkout.
+    local dashboard_env
+    dashboard_env="$(cd services/dashboard-api 2>/dev/null && pwd)/.env" \
+        || dashboard_env="$REPO/services/dashboard-api/.env"
+    if [ ! -f "$dashboard_env" ]; then
+        echo "Error: $dashboard_env not found — can't read the storage connection string."
+        echo "Run this from a Jolteon worktree (or 'jt worktree setup' first)."
+        exit 1
+    fi
+
+    # Read the raw value directly rather than sourcing: dotenv values are
+    # unquoted, and a connection string is full of ';' — which the shell would
+    # treat as command separators, truncating it at the first field.
+    local conn
+    conn="$(sed -nE 's/^[[:space:]]*COMPANION_STORAGE_CONNECTION_STRING=(.*)$/\1/p' "$dashboard_env" | head -1)"
+    conn="${conn%\"}"; conn="${conn#\"}"   # strip optional surrounding quotes
+    conn="${conn%\'}"; conn="${conn#\'}"
+    if [ -z "$conn" ]; then
+        echo "Error: COMPANION_STORAGE_CONNECTION_STRING is not set in $dashboard_env."
+        exit 1
+    fi
+
+    local account
+    account="$(printf '%s' "$conn" | sed -E 's/.*AccountName=([^;]*).*/\1/')"
+
+    if az storage cors list --services b --connection-string "$conn" -o json 2>/dev/null \
+        | grep -qF "$origin"; then
+        echo "CORS already allows $origin on blob account '$account'. Nothing to do."
+        echo "Run 'jt app run --dev', then open a pulse report in the UI."
+        exit 0
+    fi
+
+    echo "Adding blob CORS rule on '$account': allow GET/HEAD from $origin ..."
+    az storage cors add \
+        --services b \
+        --methods GET HEAD \
+        --origins "$origin" \
+        --allowed-headers '*' \
+        --exposed-headers '*' \
+        --max-age 3600 \
+        --connection-string "$conn"
+
+    echo ""
+    echo "Done. The locally-run UI can now fetch pulse-report blobs from '$account'."
+    echo "Next: 'jt app run --dev', then open a pulse report in the app."
+}
+
 # ─── MCP commands ──────────────────────────────────────────
 
 cmd_mcp_run() {
@@ -1052,6 +1143,14 @@ MCP:
   jt mcp run [--lcl|--dev|--prd] [--port N]   Start MCP service (default: --dev, port 8002)
   jt mcp stop [--port N]               Stop MCP service (default: port 8002)
 
+Pulse (view dev pulse reports in the locally-run UI):
+  jt pulse cors [origin]               Allow the local frontend origin (default
+                                       http://localhost:5173) to fetch pulse-report
+                                       blobs from the dev Storage account. Run once
+                                       per machine, then 'jt app run --dev' and open a
+                                       report in the app. Idempotent; reuses the
+                                       dashboard-api connection string (no az login).
+
 Browser:
   jt browser open <profile> [url]      Open headed browser (default: localhost:5173)
   jt browser stop                      Stop agent-browser
@@ -1086,6 +1185,7 @@ Examples:
   jt app forward
   jt mcp run --dev
   jt mcp run --prd --port 9000
+  jt pulse cors
   jt browser open customer
   jt browser open root http://localhost:5173/admin
   jt diff open
@@ -1131,6 +1231,15 @@ dispatch_mcp() {
         run)  cmd_mcp_run "$@" ;;
         stop) cmd_mcp_stop "$@" ;;
         *)    echo "Unknown mcp verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
+    esac
+}
+
+dispatch_pulse() {
+    local verb="${1:-}"
+    shift 2>/dev/null || true
+    case "$verb" in
+        cors) cmd_pulse_cors "${1:-}" ;;
+        *)    echo "Unknown pulse verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
     esac
 }
 
@@ -1196,6 +1305,7 @@ case "$noun" in
     worktree|wt)    dispatch_worktree "$@" ;;
     app)            dispatch_app "$@" ;;
     mcp)            dispatch_mcp "$@" ;;
+    pulse)          dispatch_pulse "$@" ;;
     browser)        dispatch_browser "$@" ;;
     sdk)            dispatch_sdk "$@" ;;
     diff)           dispatch_diff "$@" ;;
