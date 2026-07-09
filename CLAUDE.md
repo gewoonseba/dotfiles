@@ -61,7 +61,7 @@ stow -D folder-name       # Remove symlinks (destow)
 - **Linux**: Use `yay` over `pacman` or other package managers whenever possible
 - **macOS**: Platform-specific configs go in separate folders (e.g., `cursor-macos/`)
 - **WSL (Ubuntu)**: `setup` detects WSL (via `is_wsl`) and tailors itself for a headless install:
-  - **Stows only the headless-safe set**: `zsh starship claude scripts`. Desktop-only folders
+  - **Stows only the headless-safe set**: `zsh tmux starship claude scripts`. Desktop-only folders
     (`ghostty`, `hypr`, `cursor*`, `zed`) are excluded — edit from the Windows host (e.g.
     Cursor/VS Code over Remote-WSL). The `gamemode-install` / `photo-backup` scripts are
     Arch-gaming / macOS-`/Volumes` only and never run here.
@@ -86,6 +86,7 @@ stow -D folder-name       # Remove symlinks (destow)
 - **cursor-extensions/**: Extension management via `extensions.txt`
 - **ghostty/**: Ghostty terminal emulator
 - **hypr/**: Hyprland window manager (Linux)
+- **tmux/**: Shared tmux config with SSH-friendly sessions and machine-local status color override
 - **scripts/**: All install and maintenance scripts in `.local/bin/`
 - **starship/**: Starship prompt configuration
 - **zsh/**: Zsh shell configuration

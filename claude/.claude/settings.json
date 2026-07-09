@@ -1,4 +1,7 @@
 {
+  "env": {
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "50"
+  },
   "permissions": {
     "allow": [
       "mcp__pencil",
@@ -37,6 +40,7 @@
     ],
     "defaultMode": "auto"
   },
+  "model": "opus[1m]",
   "hooks": {},
   "statusLine": {
     "type": "command",
@@ -91,9 +95,6 @@
   "skipWorkflowUsageWarning": true,
   "theme": "light",
   "editorMode": "normal",
-  "env": {
-    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "50"
-  },
   "autoCompactEnabled": true,
   "remoteControlAtStartup": true,
   "skipAutoPermissionPrompt": true

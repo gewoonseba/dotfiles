@@ -60,7 +60,7 @@ install_pkgs() {
 bootstrap_deps() {
     # Baseline CLI tools — same package name across apt/brew/pacman.
     local pkg_missing=()
-    for cmd in curl stow fzf jq zsh eza; do
+    for cmd in curl stow fzf jq zsh tmux eza; do
         command -v "$cmd" &> /dev/null || pkg_missing+=("$cmd")
     done
     # bat: Ubuntu ships the binary as `batcat` (.zshrc aliases it), so only
@@ -223,7 +223,7 @@ fi
 # (ghostty, hypr, cursor*, zed) can't run headless and are excluded on WSL —
 # editing is done from the Windows host (e.g. Cursor/VS Code over Remote-WSL).
 # Skills are handled separately by the agents-sync-skills step below.
-STOW_FOLDERS="zsh starship claude scripts"
+STOW_FOLDERS="zsh tmux starship claude scripts"
 
 # ~/.claude holds live runtime state (credentials, history). Stowing claude only
 # folds in settings.json and leaves runtime files alone. Back up a pre-existing

@@ -55,6 +55,33 @@
       "skillFolderHash": "343db72180d05814949fef7d46be96b5c6ee86b3",
       "installedAt": "2026-07-06T08:33:28.595Z",
       "updatedAt": "2026-07-06T08:33:28.595Z"
+    },
+    "agentation": {
+      "source": "benjitaylor/agentation",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/benjitaylor/agentation.git",
+      "skillPath": "skills/agentation/SKILL.md",
+      "skillFolderHash": "681e4c2a06b0959f92b1a55d5043866e7f6f6c9b",
+      "installedAt": "2026-07-07T11:55:52.558Z",
+      "updatedAt": "2026-07-07T11:55:52.558Z"
+    },
+    "agentation-self-driving": {
+      "source": "benjitaylor/agentation",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/benjitaylor/agentation.git",
+      "skillPath": "skills/agentation-self-driving/SKILL.md",
+      "skillFolderHash": "bbf519c3583376c27845a74212a53e5bcba6818e",
+      "installedAt": "2026-07-07T11:55:52.559Z",
+      "updatedAt": "2026-07-07T11:55:52.559Z"
+    },
+    "cmux": {
+      "source": "manaflow-ai/cmux",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/manaflow-ai/cmux.git",
+      "skillPath": "skills/cmux/SKILL.md",
+      "skillFolderHash": "d7b4a428df22553048a6830f4b5f3733fe1f9393",
+      "installedAt": "2026-07-09T11:47:20.200Z",
+      "updatedAt": "2026-07-09T11:47:20.200Z"
     }
   },
   "dismissed": {
