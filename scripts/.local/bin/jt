@@ -10,7 +10,11 @@ set -euo pipefail
 # case-sensitive box that uses "Work".
 WORK="$HOME/work"; [ -d "$WORK" ] || WORK="$HOME/Work"
 REPO="$WORK/jolteon"
-WORKSPACE="$WORK/workspaces/jolteon"
+# All worktrees live flat under ~/work/worktrees/<repo>/<worktree-name>, with a
+# slash-free worktree name (a branch's '/' becomes '-' — see wt_dir). Keeping
+# them one level deep, not nested by branch prefix, means the on-disk name is
+# always a single directory that mirrors the branch.
+WORKTREES="$WORK/worktrees/jolteon"
 
 # Prefer system-installed Python (e.g. Homebrew) over uv-managed downloads
 export UV_PYTHON_PREFERENCE=system
@@ -20,6 +24,69 @@ export UV_PYTHON_PREFERENCE=system
 hint_worktree() {
     echo ""
     echo "Hint: make sure you're in a Jolteon worktree (see 'jt worktree list')."
+}
+
+# Resolve the on-disk worktree directory for a branch. Worktree names are
+# slash-free, so a branch like 'feat/foo' maps to '<WORKTREES>/feat-foo'.
+wt_dir() {
+    printf '%s/%s' "$WORKTREES" "${1//\//-}"
+}
+
+# Echo a usable current directory, or fail with guidance. A shell whose cwd was
+# moved or removed out from under it (e.g. after a worktree was relocated or
+# removed) keeps a stale $PWD that no longer exists, which otherwise turns into
+# a confusing "getcwd"/"no pyproject.toml" cascade in the commands below.
+cwd_or_die() {
+    local d
+    d="$(pwd -L 2>/dev/null || true)"
+    if [ -z "$d" ] || [ ! -d "$d" ]; then
+        echo "Error: the current directory is unavailable — it was likely moved or removed" >&2
+        echo "(e.g. after a worktree was relocated). Re-enter it in a fresh shell:" >&2
+        echo "  cd $WORKTREES/<name>" >&2
+        echo "…or pass the target explicitly instead of relying on the current directory." >&2
+        return 1
+    fi
+    printf '%s\n' "$d"
+}
+
+# Interactive one-of picker over lines read from stdin. Uses fzf when present,
+# otherwise a numbered menu. Echoes the chosen raw line on stdout; the UI and
+# prompts go to the tty/stderr so callers can capture the result via $(...).
+# Returns non-zero if there's nothing to pick or the user aborts.
+pick_line() {
+    local prompt="${1:-pick> }" input
+    input="$(cat)"
+    [ -z "$input" ] && { echo "Nothing to pick." >&2; return 1; }
+
+    if command -v fzf >/dev/null 2>&1; then
+        printf '%s\n' "$input" | fzf --prompt="$prompt" --height=40% --reverse --with-nth=1.. --delimiter=$'\t'
+        return
+    fi
+
+    # Numbered fallback. Menu to stderr; read from the tty (stdin is the pipe).
+    local -a rows=(); local line i=1
+    while IFS= read -r line; do
+        printf "  %2d) %s\n" "$i" "${line//$'\t'/  }" >&2
+        rows+=("$line"); i=$((i+1))
+    done <<< "$input"
+    local choice
+    read -rp "$prompt[1-${#rows[@]}]: " choice </dev/tty || return 1
+    [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#rows[@]}" ] \
+        || { echo "Invalid choice." >&2; return 1; }
+    printf '%s\n' "${rows[$((choice-1))]}"
+}
+
+# Emit "branch<TAB>dir" for each worktree with a checked-out branch. Pass
+# "managed" to restrict to jt worktrees under $WORKTREES (skips the main
+# checkout and other tools' trees). Detached worktrees have no branch and are
+# omitted (nothing to key remove/nuke on).
+worktrees_tsv() {
+    local managed="${1:-}"
+    git -C "$REPO" worktree list --porcelain 2>/dev/null | awk -v managed="$managed" -v wt="$WORKTREES/" '
+        /^worktree / { d=substr($0, 10) }
+        /^branch /   { b=$2; sub("refs/heads/", "", b);
+                       if (managed == "" || substr(d, 1, length(wt)) == wt) printf "%s\t%s\n", b, d }
+    '
 }
 
 trap 'hint_worktree' ERR
@@ -217,7 +284,7 @@ cmd_worktree_create() {
     local branch="${1:-}"
     local preamble="${2:-}"
     [ -z "$branch" ] && { echo "Usage: jt worktree create <branch>"; exit 1; }
-    local worktree_dir="$WORKSPACE/$branch"
+    local worktree_dir; worktree_dir="$(wt_dir "$branch")"
 
     if [ -d "$worktree_dir" ]; then
         echo "Error: directory already exists: $worktree_dir"
@@ -237,8 +304,19 @@ cmd_worktree_create() {
 cmd_worktree_checkout() {
     local branch="${1:-}"
     local preamble="${2:-}"
+    if [ -z "$branch" ]; then
+        # Fuzzy-pick a remote branch that isn't already checked out somewhere.
+        echo "Fetching remote branches..." >&2
+        git -C "$REPO" fetch origin --prune --quiet
+        local checked_out
+        checked_out="$(git -C "$REPO" worktree list --porcelain | awk '/^branch /{sub("refs/heads/","",$2); print $2}')"
+        branch="$(git -C "$REPO" for-each-ref --format='%(refname:short)' refs/remotes/origin \
+            | sed 's#^origin/##' | grep -vxF HEAD \
+            | grep -vxF "$checked_out" | sort -u \
+            | pick_line "checkout> ")" || { echo "Aborted."; exit 0; }
+    fi
     [ -z "$branch" ] && { echo "Usage: jt worktree checkout <branch>"; exit 1; }
-    local worktree_dir="$WORKSPACE/$branch"
+    local worktree_dir; worktree_dir="$(wt_dir "$branch")"
 
     if [ -d "$worktree_dir" ]; then
         echo "Error: directory already exists: $worktree_dir"
@@ -269,43 +347,12 @@ cmd_worktree_open() {
 
     if [ -z "$branch" ]; then
         # Interactive picker over all worktrees (branch \t dir).
-        local entries
-        entries=$(git -C "$REPO" worktree list --porcelain | awk '
-            /^worktree / { d=substr($0, 10) }
-            /^branch /   { b=$2; sub("refs/heads/", "", b); printf "%s\t%s\n", b, d }
-        ')
-        if [ -z "$entries" ]; then
-            echo "No worktrees found."
-            exit 1
-        fi
-
-        if command -v fzf >/dev/null 2>&1; then
-            local pick
-            pick=$(printf '%s\n' "$entries" | fzf \
-                --prompt="worktree> " \
-                --delimiter=$'\t' \
-                --nth=1 \
-                --height=40% \
-                --reverse) || { echo "Aborted."; exit 0; }
-            target_dir=$(printf '%s' "$pick" | awk -F'\t' '{print $2}')
-        else
-            local -a arr_dirs=()
-            local i=1
-            while IFS=$'\t' read -r b d; do
-                printf "  %2d) %-48s %s\n" "$i" "$b" "$d"
-                arr_dirs+=("$d")
-                i=$((i+1))
-            done <<< "$entries"
-            local choice
-            read -rp "Pick a worktree (1-${#arr_dirs[@]}): " choice
-            if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#arr_dirs[@]} ]; then
-                echo "Invalid choice."
-                exit 1
-            fi
-            target_dir="${arr_dirs[$((choice-1))]}"
-        fi
+        local pick
+        pick="$(worktrees_tsv | pick_line "worktree> ")" || { echo "Aborted."; exit 0; }
+        target_dir="$(printf '%s' "$pick" | cut -f2)"
+        [ -n "$target_dir" ] || { echo "No selection."; exit 1; }
     else
-        target_dir="$WORKSPACE/$branch"
+        target_dir="$(wt_dir "$branch")"
         if [ ! -d "$target_dir" ]; then
             echo "Error: no worktree at $target_dir"
             echo "Use 'jt worktree list' to see available worktrees, or 'jt worktree create $branch' to create one."
@@ -335,8 +382,13 @@ cmd_worktree_list() {
 
 cmd_worktree_remove() {
     local branch="${1:-}"
+    if [ -z "$branch" ]; then
+        local pick
+        pick="$(worktrees_tsv managed | pick_line "remove> ")" || { echo "Aborted."; exit 0; }
+        branch="$(printf '%s' "$pick" | cut -f1)"
+    fi
     [ -z "$branch" ] && { echo "Usage: jt worktree remove <branch>"; exit 1; }
-    local worktree_dir="$WORKSPACE/$branch"
+    local worktree_dir; worktree_dir="$(wt_dir "$branch")"
 
     if [ ! -d "$worktree_dir" ]; then
         echo "No worktree at $worktree_dir"
@@ -360,11 +412,18 @@ cmd_worktree_cleanup() {
     while IFS=$'\t' read -r dir branch; do
         [ -z "$branch" ] && continue
         [ "$branch" = "main" ] && continue
-        # Safety: only touch worktrees inside $WORKSPACE
-        [[ "$dir" == "$WORKSPACE"/* ]] || continue
+        # Safety: only touch worktrees inside $WORKTREES
+        [[ "$dir" == "$WORKTREES"/* ]] || continue
 
         local upstream reason=""
         upstream=$(git -C "$REPO" for-each-ref --format='%(upstream:short)' "refs/heads/$branch" 2>/dev/null || true)
+        # Never sweep a worktree whose branch never had a remote branch (never pushed):
+        # no upstream configured and no matching remote-tracking ref. These hold the only
+        # copy of unpushed/uncommitted local work, so they must be removed deliberately
+        # (jt worktree remove / nuke), never by the automatic cleanup.
+        if [ -z "$upstream" ] && ! git -C "$REPO" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+            continue
+        fi
         if [ -n "$upstream" ] && ! git -C "$REPO" show-ref --verify --quiet "refs/remotes/$upstream"; then
             reason="remote branch deleted"
         elif git -C "$REPO" merge-base --is-ancestor "$branch" origin/main 2>/dev/null; then
@@ -413,8 +472,13 @@ cmd_worktree_cleanup() {
 
 cmd_worktree_nuke() {
     local branch="${1:-}"
+    if [ -z "$branch" ]; then
+        local pick
+        pick="$(worktrees_tsv managed | pick_line "nuke> ")" || { echo "Aborted."; exit 0; }
+        branch="$(printf '%s' "$pick" | cut -f1)"
+    fi
     [ -z "$branch" ] && { echo "Usage: jt worktree nuke <branch>"; exit 1; }
-    local worktree_dir="$WORKSPACE/$branch"
+    local worktree_dir; worktree_dir="$(wt_dir "$branch")"
 
     local has_worktree=0 has_local=0 has_remote=0
     [ -d "$worktree_dir" ] && has_worktree=1
@@ -447,12 +511,13 @@ cmd_worktree_nuke() {
 }
 
 cmd_worktree_setup() {
-    local dir="${1:-$(pwd)}"
+    local dir="${1:-}"
+    [ -z "$dir" ] && { dir="$(cwd_or_die)" || exit 1; }
 
     if [ ! -d "$dir" ]; then
         # Try as a branch name
-        if [ -d "$WORKSPACE/$dir" ]; then
-            dir="$WORKSPACE/$dir"
+        if [ -d "$(wt_dir "$dir")" ]; then
+            dir="$(wt_dir "$dir")"
         else
             echo "Error: no directory at $dir"
             exit 1
@@ -470,9 +535,9 @@ cmd_worktree_edit() {
     local dir
 
     if [ -z "$branch" ]; then
-        dir="$(pwd)"
+        dir="$(cwd_or_die)" || exit 1
     else
-        dir="$WORKSPACE/$branch"
+        dir="$(wt_dir "$branch")"
     fi
 
     if [ ! -d "$dir" ]; then
@@ -521,9 +586,19 @@ issue_branch_name() {
 
 cmd_issue_start() {
     local url="${1:-}"
-    [ -z "$url" ] && { echo "Usage: jt issue start <github-issue-url|number>"; exit 1; }
 
     command -v gh >/dev/null 2>&1 || { echo "Error: gh (GitHub CLI) is required for 'jt issue'."; exit 1; }
+
+    # No argument: fuzzy-pick from the repo's open issues.
+    if [ -z "$url" ]; then
+        echo "Fetching open issues from Companion-energy/jolteon..." >&2
+        local pick
+        pick="$(gh issue list --repo Companion-energy/jolteon --limit 100 --state open \
+            --json number,title --jq '.[] | "#\(.number)\t\(.title)"' \
+            | pick_line "issue> ")" || { echo "Aborted."; exit 0; }
+        url="$(printf '%s' "$pick" | sed -E 's/^#([0-9]+).*/\1/')"
+        [ -z "$url" ] && { echo "No selection."; exit 1; }
+    fi
 
     # Accept a full issue URL or a bare number (defaults to the jolteon repo).
     local owner repo number
@@ -566,9 +641,20 @@ Before making changes, fetch the issue for full context — e.g. \`gh issue view
 
 cmd_pr_review() {
     local url="${1:-}"
-    [ -z "$url" ] && { echo "Usage: jt pr review <github-pr-url|number>"; exit 1; }
 
     command -v gh >/dev/null 2>&1 || { echo "Error: gh (GitHub CLI) is required for 'jt pr'."; exit 1; }
+
+    # No argument: fuzzy-pick from the repo's open PRs.
+    if [ -z "$url" ]; then
+        echo "Fetching open PRs from Companion-energy/jolteon..." >&2
+        local pick
+        pick="$(gh pr list --repo Companion-energy/jolteon --limit 100 \
+            --json number,title,headRefName,author \
+            --jq '.[] | "#\(.number)\t\(.title)\t\(.headRefName)\t@\(.author.login)"' \
+            | pick_line "PR> ")" || { echo "Aborted."; exit 0; }
+        url="$(printf '%s' "$pick" | sed -E 's/^#([0-9]+).*/\1/')"
+        [ -z "$url" ] && { echo "No selection."; exit 1; }
+    fi
 
     # Accept a full PR URL or a bare number (defaults to the jolteon repo).
     local owner repo number
@@ -995,13 +1081,12 @@ cmd_browser_open() {
     local profiles_dir="$WORK/browser-profiles"
 
     if [ -z "$profile" ]; then
-        echo "Usage: jt browser open <profile> [url]"
-        echo ""
-        echo "Profiles:"
-        for p in "$profiles_dir"/*/; do
-            echo "  $(basename "$p")"
-        done
-        exit 1
+        # No profile: fuzzy-pick one of the available browser profiles.
+        local names
+        names="$(for p in "$profiles_dir"/*/; do [ -d "$p" ] && basename "$p"; done)"
+        [ -z "$names" ] && { echo "No browser profiles in $profiles_dir"; exit 1; }
+        profile="$(printf '%s\n' "$names" | pick_line "profile> ")" || { echo "Aborted."; exit 0; }
+        [ -z "$profile" ] && { echo "No selection."; exit 1; }
     fi
 
     if [ ! -d "$profiles_dir/$profile" ]; then
@@ -1105,29 +1190,36 @@ jt — Jolteon worktree & service manager
 Usage:
   jt <noun> <verb> [options]
 
+Most commands below fuzzy-pick (fzf, else a numbered menu) when you omit the
+argument in [brackets] — e.g. 'jt wt remove' lets you pick a worktree.
+
 Worktree (alias: wt):
   jt worktree create <branch>          Create a new worktree and branch
-  jt worktree checkout <branch>        Create a worktree from an existing remote branch
+  jt worktree checkout [branch]        Create a worktree from an existing remote branch
+                                       (pick from remote branches if none given)
   jt worktree list                     List all worktrees
-  jt worktree open [branch]            cd into a worktree (interactive picker if no branch)
+  jt worktree open [branch]            cd into a worktree (pick if no branch)
   jt worktree edit [branch]            Open worktree in Zed (default: cwd)
   jt worktree setup [branch|path]      Copy env files + install deps (default: cwd)
-  jt worktree remove <branch>          Remove one worktree + local branch (safe)
+  jt worktree remove [branch]          Remove one worktree + local branch (safe;
+                                       pick if no branch)
   jt worktree cleanup                  Bulk remove worktrees whose branch is merged
                                        into main or whose upstream was deleted
-  jt worktree nuke <branch>            Force-remove worktree + delete local AND
-                                       remote branch (destructive)
+  jt worktree nuke [branch]            Force-remove worktree + delete local AND
+                                       remote branch (destructive; pick if no branch)
 
 Issue (start work from a GitHub issue):
-  jt issue start <url|number>          Create a worktree+branch from a GitHub issue
+  jt issue start [url|number]          Create a worktree+branch from a GitHub issue
                                        (branch inferred from issue type + title)
                                        and launch the chosen agent with the issue
-                                       link as a starting prompt
+                                       link as a starting prompt. Pick from open
+                                       issues if no argument.
 
 PR (review an existing pull request):
-  jt pr review <url|number>            Check out the PR's branch into a worktree and
+  jt pr review [url|number]            Check out the PR's branch into a worktree and
                                        launch the chosen agent with /code-review as
-                                       the initial prompt
+                                       the initial prompt. Pick from open PRs if no
+                                       argument.
 
 App (backend + frontend):
   jt app run [--lcl|--dev|--prd] [--as <persona>]
@@ -1152,7 +1244,8 @@ Pulse (view dev pulse reports in the locally-run UI):
                                        dashboard-api connection string (no az login).
 
 Browser:
-  jt browser open <profile> [url]      Open headed browser (default: localhost:5173)
+  jt browser open [profile] [url]      Open headed browser (default: localhost:5173;
+                                       pick a profile if none given)
   jt browser stop                      Stop agent-browser
 
 SDK:
@@ -1166,8 +1259,11 @@ Docs (view plans/docs from another machine, e.g. your Mac):
   jt docs serve [dir] [--port N]       Serve the worktree's .context folder over HTTP
                                        (default port 8090); open http://pc-seba-1:<port>/
 
-Shortcuts:
+Shortcuts (top-level aliases for common worktree verbs):
   jt setup [branch|path]               Alias for 'jt worktree setup' (default: cwd)
+  jt open [branch]                     Alias for 'jt worktree open'
+  jt remove [branch]  (also: jt rm)    Alias for 'jt worktree remove'
+  jt nuke [branch]                     Alias for 'jt worktree nuke'
 
 Other:
   jt help                              Show this help
@@ -1312,6 +1408,11 @@ case "$noun" in
     issue)          dispatch_issue "$@" ;;
     pr)             dispatch_pr "$@" ;;
     setup)          cmd_worktree_setup "${1:-}" ;;
+    # Top-level shortcuts for the most-used worktree verbs (like 'setup'). All
+    # accept no arg and fall back to a fuzzy picker.
+    open)           cmd_worktree_open "${1:-}" ;;
+    remove|rm)      cmd_worktree_remove "${1:-}" ;;
+    nuke)           cmd_worktree_nuke "${1:-}" ;;
     docs)           dispatch_docs "$@" ;;
     help|-h|--help) cmd_help ;;
     *)              echo "Unknown command: $noun"; echo "Run 'jt help' for usage."; exit 1 ;;
