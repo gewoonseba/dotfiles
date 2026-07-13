@@ -370,14 +370,118 @@ cmd_worktree_open() {
 }
 
 cmd_worktree_list() {
-    printf "%-40s %s\n" "BRANCH" "PATH"
-    printf '─%.0s' $(seq 1 80)
-    echo
-    git -C "$REPO" worktree list --porcelain 2>/dev/null \
-    | awk '/^worktree / { dir=$2 } /^branch / {
-        branch=$2; sub("refs/heads/", "", branch);
-        printf "%-40s %s\n", branch, dir
-    }'
+    # WIP dashboard: every worktree, grouped into day sections by last activity
+    # (max of last-commit time and folder mtime), most-recent day first. Each
+    # row shows its source ([jt]/[emdash]/[claude]/…), a PR-state dot, and the
+    # PR title+number — falling back to the last commit subject when no PR.
+
+    # Colors only when writing to a terminal.
+    local reset dim bold green yellow purple red cyan blue grey
+    if [ -t 1 ]; then
+        reset=$'\e[0m'; dim=$'\e[2m'; bold=$'\e[1m'
+        green=$'\e[32m'; yellow=$'\e[33m'; purple=$'\e[35m'
+        red=$'\e[31m'; cyan=$'\e[36m'; blue=$'\e[34m'; grey=$'\e[90m'
+    else
+        reset=; dim=; bold=; green=; yellow=; purple=; red=; cyan=; blue=; grey=
+    fi
+
+    # trunc <str> <width> [end]  (end=1 -> keep tail / left ellipsis)
+    trunc() {
+        local s="$1" w="$2" end="${3:-0}"
+        (( ${#s} <= w )) && { printf '%s' "$s"; return; }
+        if (( end )); then printf '…%s' "${s: -$((w - 1))}"; else printf '%s…' "${s:0:$((w - 1))}"; fi
+    }
+
+    # One gh call maps branch -> PR state/number/title (best-effort).
+    declare -A pr_state pr_num pr_title
+    if command -v gh >/dev/null 2>&1; then
+        local ref st num title
+        while IFS=$'\t' read -r ref st num title; do
+            [ -z "$ref" ] && continue
+            [ -n "${pr_state[$ref]:-}" ] && continue   # gh lists newest first; keep it
+            pr_state[$ref]="$st"; pr_num[$ref]="$num"; pr_title[$ref]="$title"
+        done < <( (cd "$REPO" && gh pr list --state all --limit 400 \
+            --json number,title,headRefName,state,isDraft \
+            --jq '.[] | [.headRefName, (if .isDraft then "DRAFT" else .state end), (.number|tostring), .title] | @tsv') 2>/dev/null )
+    fi
+
+    # One row per worktree: "activity<TAB>branch<TAB>dir<TAB>src".
+    local rows="" branch dir ct mtime act src
+    while IFS=$'\t' read -r branch dir; do
+        [ -d "$dir" ] || continue
+        ct=$(git -C "$dir" log -1 --format=%ct 2>/dev/null) || true; ct=${ct:-0}
+        mtime=$(stat -c %Y "$dir" 2>/dev/null) || true; mtime=${mtime:-0}
+        act=$ct; [ "$mtime" -gt "$act" ] && act=$mtime
+        if   [ "$dir" = "$REPO" ];                     then src=main
+        elif [[ "$dir" == "$WORKTREES"/* ]];           then src=jt
+        elif [[ "$dir" == *"/.claude/worktrees/"* ]];  then src=claude
+        elif [[ "$dir" == *"/emdash/"* || "$dir" == *"/.emdash/"* ]]; then src=emdash
+        elif [[ "$dir" == *"/workspaces/"* ]];         then src=wksp
+        else src=other
+        fi
+        rows+="$act"$'\t'"$branch"$'\t'"$dir"$'\t'"$src"$'\n'
+    done < <(git -C "$REPO" worktree list --porcelain 2>/dev/null \
+        | awk '/^worktree / { d=substr($0,10) } /^branch / { b=$2; sub("refs/heads/","",b); print b "\t" d }')
+
+    if [ -z "$rows" ]; then echo "(no worktrees)"; return; fi
+    rows=$(printf '%s' "$rows" | sort -t$'\t' -k1,1nr)
+
+    local total open
+    total=$(printf '%s\n' "$rows" | grep -c .) || true
+    open=$(printf '%s\n' "${pr_state[@]:-}" | grep -cx OPEN) || true
+    printf '%s%s worktrees%s %s· %s open PR(s)%s\n' \
+        "$bold" "$total" "$reset" "$dim" "$open" "$reset"
+
+    local today yesterday
+    today=$(date +%Y-%m-%d)
+    yesterday=$(date -d 'yesterday' +%Y-%m-%d 2>/dev/null) || yesterday=$(date -v-1d +%Y-%m-%d)
+
+    # Render, emitting a day header whenever the day changes.
+    local cur_day="" day daylabel dot statecol summary badge badgecol tm subj
+    while IFS=$'\t' read -r act branch dir src; do
+        day=$(date -d "@$act" +%Y-%m-%d)
+        if [ "$day" != "$cur_day" ]; then
+            cur_day="$day"
+            case "$day" in
+                "$today")     daylabel="Today" ;;
+                "$yesterday") daylabel="Yesterday" ;;
+                *)            daylabel=$(date -d "@$act" +'%a %d %b') ;;
+            esac
+            printf '\n%s%s  %s%s\n' "$bold" "$daylabel" "$day" "$reset"
+        fi
+
+        case "${pr_state[$branch]:-}" in
+            OPEN)   dot="${green}●${reset}";  statecol="$green" ;;
+            DRAFT)  dot="${yellow}◐${reset}"; statecol="$yellow" ;;
+            MERGED) dot="${purple}●${reset}"; statecol="$purple" ;;
+            CLOSED) dot="${red}●${reset}";    statecol="$red" ;;
+            *)      dot="${grey}○${reset}";   statecol="" ;;
+        esac
+        if [ -n "${pr_num[$branch]:-}" ]; then
+            summary="${statecol}#${pr_num[$branch]}${reset} $(trunc "${pr_title[$branch]}" 58)"
+        else
+            subj=$(git -C "$dir" log -1 --format=%s 2>/dev/null) || true
+            summary="${dim}$(trunc "${subj:-—}" 58)${reset}"
+        fi
+
+        case "$src" in
+            main)   badgecol="$bold" ;;
+            jt)     badgecol="$cyan" ;;
+            emdash) badgecol="$purple" ;;
+            claude) badgecol="$blue" ;;
+            *)      badgecol="$grey" ;;
+        esac
+        badge=$(printf '%-8s' "[$src]")
+        tm=$(date -d "@$act" +%H:%M)
+
+        printf '  %s%s%s %s  %s%s%s  %s  %s\n' \
+            "$dim" "$tm" "$reset" "$dot" \
+            "$badgecol" "$badge" "$reset" \
+            "$(printf '%-42s' "$(trunc "$branch" 42)")" \
+            "$summary"
+    done < <(printf '%s\n' "$rows")
+
+    printf '\n%s● open  ◐ draft  ● merged  ● closed  ○ no PR%s\n' "$dim" "$reset"
 }
 
 cmd_worktree_remove() {
