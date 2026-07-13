@@ -369,30 +369,35 @@ cmd_worktree_open() {
     exec "$SHELL"
 }
 
-cmd_worktree_list() {
-    # WIP dashboard: every worktree, grouped into day sections by last activity
-    # (max of last-commit time and folder mtime), most-recent day first. Each
-    # row shows its source ([jt]/[emdash]/[claude]/…), a PR-state dot, and the
-    # PR title+number — falling back to the last commit subject when no PR.
+# ─── Worktree dashboard (shared helpers) ──────────────────────
+#
+# 'jt wt' opens an interactive fzf dashboard; 'jt wt list' prints the same
+# data statically. Both share the collectors/renderers below so the two views
+# never drift.
 
-    # Colors only when writing to a terminal.
-    local reset dim bold green yellow purple red cyan blue grey
-    if [ -t 1 ]; then
-        reset=$'\e[0m'; dim=$'\e[2m'; bold=$'\e[1m'
-        green=$'\e[32m'; yellow=$'\e[33m'; purple=$'\e[35m'
-        red=$'\e[31m'; cyan=$'\e[36m'; blue=$'\e[34m'; grey=$'\e[90m'
-    else
-        reset=; dim=; bold=; green=; yellow=; purple=; red=; cyan=; blue=; grey=
-    fi
+# _wt_trunc <str> <width> [end]   (end=1 -> keep tail / left ellipsis)
+_wt_trunc() {
+    local s="$1" w="$2" end="${3:-0}"
+    (( ${#s} <= w )) && { printf '%s' "$s"; return; }
+    if (( end )); then printf '…%s' "${s: -$((w - 1))}"; else printf '%s…' "${s:0:$((w - 1))}"; fi
+}
 
-    # trunc <str> <width> [end]  (end=1 -> keep tail / left ellipsis)
-    trunc() {
-        local s="$1" w="$2" end="${3:-0}"
-        (( ${#s} <= w )) && { printf '%s' "$s"; return; }
-        if (( end )); then printf '…%s' "${s: -$((w - 1))}"; else printf '%s…' "${s:0:$((w - 1))}"; fi
-    }
+# _wt_daylabel <epoch> <today-ymd> <yesterday-ymd>  ->  "Today  2026-07-13"
+_wt_daylabel() {
+    local act="$1" today="$2" yest="$3" day
+    day=$(date -d "@$act" +%Y-%m-%d)
+    case "$day" in
+        "$today") printf 'Today      %s' "$day" ;;
+        "$yest")  printf 'Yesterday  %s' "$day" ;;
+        *)        printf '%s  %s' "$(date -d "@$act" +'%a %d %b')" "$day" ;;
+    esac
+}
 
-    # One gh call maps branch -> PR state/number/title (best-effort).
+# Emit one sorted TSV record per worktree, most-recent activity first:
+#   act \t branch \t dir \t src \t prstate \t prnum \t prtitle \t subject
+# Activity = max(last-commit time, folder mtime). PR fields come from a single
+# 'gh pr list' call; subject is the last commit's subject (fallback summary).
+_wt_collect() {
     declare -A pr_state pr_num pr_title
     if command -v gh >/dev/null 2>&1; then
         local ref st num title
@@ -405,11 +410,13 @@ cmd_worktree_list() {
             --jq '.[] | [.headRefName, (if .isDraft then "DRAFT" else .state end), (.number|tostring), .title] | @tsv') 2>/dev/null )
     fi
 
-    # One row per worktree: "activity<TAB>branch<TAB>dir<TAB>src".
-    local rows="" branch dir ct mtime act src
+    local rows="" branch dir logline ct subj mtime act src
     while IFS=$'\t' read -r branch dir; do
         [ -d "$dir" ] || continue
-        ct=$(git -C "$dir" log -1 --format=%ct 2>/dev/null) || true; ct=${ct:-0}
+        logline=$(git -C "$dir" log -1 --format='%ct%x09%s' 2>/dev/null) || true
+        ct=${logline%%$'\t'*}; subj=${logline#*$'\t'}
+        [ "$subj" = "$logline" ] && subj=""            # no tab -> no commits
+        [[ "$ct" =~ ^[0-9]+$ ]] || ct=0
         mtime=$(stat -c %Y "$dir" 2>/dev/null) || true; mtime=${mtime:-0}
         act=$ct; [ "$mtime" -gt "$act" ] && act=$mtime
         if   [ "$dir" = "$REPO" ];                     then src=main
@@ -419,69 +426,255 @@ cmd_worktree_list() {
         elif [[ "$dir" == *"/workspaces/"* ]];         then src=wksp
         else src=other
         fi
-        rows+="$act"$'\t'"$branch"$'\t'"$dir"$'\t'"$src"$'\n'
+        rows+="$act"$'\t'"$branch"$'\t'"$dir"$'\t'"$src"$'\t'"${pr_state[$branch]:-}"$'\t'"${pr_num[$branch]:-}"$'\t'"${pr_title[$branch]:-}"$'\t'"$subj"$'\n'
     done < <(git -C "$REPO" worktree list --porcelain 2>/dev/null \
         | awk '/^worktree / { d=substr($0,10) } /^branch / { b=$2; sub("refs/heads/","",b); print b "\t" d }')
 
-    if [ -z "$rows" ]; then echo "(no worktrees)"; return; fi
-    rows=$(printf '%s' "$rows" | sort -t$'\t' -k1,1nr)
+    [ -z "$rows" ] && return 0
+    printf '%s' "$rows" | sort -t$'\t' -k1,1nr
+}
 
-    local total open
-    total=$(printf '%s\n' "$rows" | grep -c .) || true
-    open=$(printf '%s\n' "${pr_state[@]:-}" | grep -cx OPEN) || true
-    printf '%s%s worktrees%s %s· %s open PR(s)%s\n' \
-        "$bold" "$total" "$reset" "$dim" "$open" "$reset"
+# Render one dashboard row (no leading day header, no trailing newline).
+#   _wt_render_row <color 0|1> <collect-record>
+_wt_render_row() {
+    local color="$1" rec="$2"
+    local act branch dir src prstate prnum prtitle subj
+    IFS=$'\t' read -r act branch dir src prstate prnum prtitle subj <<<"$rec"
+    local reset dim bold green yellow purple red cyan blue grey
+    if [ "$color" = 1 ]; then
+        reset=$'\e[0m'; dim=$'\e[2m'; bold=$'\e[1m'
+        green=$'\e[32m'; yellow=$'\e[33m'; purple=$'\e[35m'
+        red=$'\e[31m'; cyan=$'\e[36m'; blue=$'\e[34m'; grey=$'\e[90m'
+    else reset=; dim=; bold=; green=; yellow=; purple=; red=; cyan=; blue=; grey=; fi
+
+    local dot statecol summary badge badgecol tm
+    case "$prstate" in
+        OPEN)   dot="${green}●${reset}";  statecol="$green" ;;
+        DRAFT)  dot="${yellow}◐${reset}"; statecol="$yellow" ;;
+        MERGED) dot="${purple}●${reset}"; statecol="$purple" ;;
+        CLOSED) dot="${red}●${reset}";    statecol="$red" ;;
+        *)      dot="${grey}○${reset}";   statecol="" ;;
+    esac
+    if [ -n "$prnum" ]; then
+        summary="${statecol}#${prnum}${reset} $(_wt_trunc "$prtitle" 58)"
+    else
+        summary="${dim}$(_wt_trunc "${subj:-—}" 58)${reset}"
+    fi
+    case "$src" in
+        main)   badgecol="$bold" ;;
+        jt)     badgecol="$cyan" ;;
+        emdash) badgecol="$purple" ;;
+        claude) badgecol="$blue" ;;
+        *)      badgecol="$grey" ;;
+    esac
+    badge=$(printf '%-8s' "[$src]")
+    tm=$(date -d "@$act" +%H:%M)
+    printf '  %s%s%s %s  %s%s%s  %s  %s' \
+        "$dim" "$tm" "$reset" "$dot" \
+        "$badgecol" "$badge" "$reset" \
+        "$(printf '%-42s' "$(_wt_trunc "$branch" 42)")" \
+        "$summary"
+}
+
+cmd_worktree_list() {
+    # Static WIP dashboard: every worktree in day sections, newest first.
+    local color=0; [ -t 1 ] && color=1
+    local reset dim bold green yellow purple grey
+    if [ "$color" = 1 ]; then
+        reset=$'\e[0m'; dim=$'\e[2m'; bold=$'\e[1m'
+        green=$'\e[32m'; yellow=$'\e[33m'; purple=$'\e[35m'; grey=$'\e[90m'
+    else reset=; dim=; bold=; green=; yellow=; purple=; grey=; fi
+
+    local data; data=$(_wt_collect)
+    if [ -z "$data" ]; then echo "(no worktrees)"; return; fi
+
+    local total open draft merged nopr
+    total=$(printf '%s\n' "$data" | grep -c .) || true
+    read -r open draft merged nopr < <(printf '%s\n' "$data" | awk -F'\t' '
+        { if($5=="OPEN")o++; else if($5=="DRAFT")d++; else if($5=="MERGED")m++; else if($5=="")n++ }
+        END { printf "%d %d %d %d\n", o+0, d+0, m+0, n+0 }') || true
+    printf '%s%s worktrees%s  %s%s open%s · %s%s draft%s · %s%s merged%s · %s%s no-PR%s\n' \
+        "$bold" "$total" "$reset" \
+        "$green" "$open" "$reset" "$yellow" "$draft" "$reset" \
+        "$purple" "$merged" "$reset" "$grey" "$nopr" "$reset"
 
     local today yesterday
     today=$(date +%Y-%m-%d)
     yesterday=$(date -d 'yesterday' +%Y-%m-%d 2>/dev/null) || yesterday=$(date -v-1d +%Y-%m-%d)
 
-    # Render, emitting a day header whenever the day changes.
-    local cur_day="" day daylabel dot statecol summary badge badgecol tm subj
-    while IFS=$'\t' read -r act branch dir src; do
+    local cur_day="" rec act day
+    while IFS= read -r rec; do
+        act=${rec%%$'\t'*}
         day=$(date -d "@$act" +%Y-%m-%d)
         if [ "$day" != "$cur_day" ]; then
             cur_day="$day"
-            case "$day" in
-                "$today")     daylabel="Today" ;;
-                "$yesterday") daylabel="Yesterday" ;;
-                *)            daylabel=$(date -d "@$act" +'%a %d %b') ;;
-            esac
-            printf '\n%s%s  %s%s\n' "$bold" "$daylabel" "$day" "$reset"
+            printf '\n%s%s%s\n' "$bold" "$(_wt_daylabel "$act" "$today" "$yesterday")" "$reset"
         fi
-
-        case "${pr_state[$branch]:-}" in
-            OPEN)   dot="${green}●${reset}";  statecol="$green" ;;
-            DRAFT)  dot="${yellow}◐${reset}"; statecol="$yellow" ;;
-            MERGED) dot="${purple}●${reset}"; statecol="$purple" ;;
-            CLOSED) dot="${red}●${reset}";    statecol="$red" ;;
-            *)      dot="${grey}○${reset}";   statecol="" ;;
-        esac
-        if [ -n "${pr_num[$branch]:-}" ]; then
-            summary="${statecol}#${pr_num[$branch]}${reset} $(trunc "${pr_title[$branch]}" 58)"
-        else
-            subj=$(git -C "$dir" log -1 --format=%s 2>/dev/null) || true
-            summary="${dim}$(trunc "${subj:-—}" 58)${reset}"
-        fi
-
-        case "$src" in
-            main)   badgecol="$bold" ;;
-            jt)     badgecol="$cyan" ;;
-            emdash) badgecol="$purple" ;;
-            claude) badgecol="$blue" ;;
-            *)      badgecol="$grey" ;;
-        esac
-        badge=$(printf '%-8s' "[$src]")
-        tm=$(date -d "@$act" +%H:%M)
-
-        printf '  %s%s%s %s  %s%s%s  %s  %s\n' \
-            "$dim" "$tm" "$reset" "$dot" \
-            "$badgecol" "$badge" "$reset" \
-            "$(printf '%-42s' "$(trunc "$branch" 42)")" \
-            "$summary"
-    done < <(printf '%s\n' "$rows")
+        printf '%s\n' "$(_wt_render_row "$color" "$rec")"
+    done <<<"$data"
 
     printf '\n%s● open  ◐ draft  ● merged  ● closed  ○ no PR%s\n' "$dim" "$reset"
+}
+
+# Internal: feed lines for the fzf UI. Fields (TAB-separated):
+#   1 visible(colored)  2 kind(row|header)  3 dir  4 branch  5 prstate  6 prnum  7 prtitle
+_wt_fzf_feed() {
+    local data; data=$(_wt_collect)
+    [ -z "$data" ] && return 0
+    local today yesterday
+    today=$(date +%Y-%m-%d)
+    yesterday=$(date -d 'yesterday' +%Y-%m-%d 2>/dev/null) || yesterday=$(date -v-1d +%Y-%m-%d)
+
+    local bold=$'\e[1m' dim=$'\e[2m' reset=$'\e[0m'
+    local cur_day="" act branch dir src prstate prnum prtitle subj day rec vis
+    while IFS=$'\t' read -r act branch dir src prstate prnum prtitle subj; do
+        day=$(date -d "@$act" +%Y-%m-%d)
+        if [ "$day" != "$cur_day" ]; then
+            cur_day="$day"
+            printf '%s── %s ──%s\theader\t\t\t\t\t\n' \
+                "$bold$dim" "$(_wt_daylabel "$act" "$today" "$yesterday")" "$reset"
+        fi
+        rec="$act"$'\t'"$branch"$'\t'"$dir"$'\t'"$src"$'\t'"$prstate"$'\t'"$prnum"$'\t'"$prtitle"$'\t'"$subj"
+        vis=$(_wt_render_row 1 "$rec")
+        printf '%s\trow\t%s\t%s\t%s\t%s\t%s\n' "$vis" "$dir" "$branch" "$prstate" "$prnum" "$prtitle"
+    done <<<"$data"
+}
+
+# Internal: fzf preview pane.  _preview <dir> <prstate> <prnum> <prtitle>
+cmd_worktree_preview() {
+    local dir="${1:-}" prstate="${2:-}" prnum="${3:-}" prtitle="${4:-}"
+    [ -n "$dir" ] && [ -d "$dir" ] || return 0
+    local reset=$'\e[0m' dim=$'\e[2m' bold=$'\e[1m' cyan=$'\e[36m' yellow=$'\e[33m'
+    local branch; branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null) || true
+    printf '%s%s%s\n%s%s%s\n\n' "$bold" "${branch:-?}" "$reset" "$dim" "$dir" "$reset"
+    if [ -n "$prnum" ]; then
+        printf '%sPR #%s%s  (%s)\n%s\n\n' "$cyan" "$prnum" "$reset" "${prstate:-?}" "$prtitle"
+    else
+        printf '%sno PR%s\n\n' "$dim" "$reset"
+    fi
+    local dirty ab ahead behind
+    dirty=$(git -C "$dir" status --porcelain 2>/dev/null | grep -c .) || true
+    ab=$(git -C "$dir" rev-list --left-right --count origin/main...HEAD 2>/dev/null) || true
+    behind=$(printf '%s' "$ab" | awk '{print $1+0}'); ahead=$(printf '%s' "$ab" | awk '{print $2+0}')
+    printf '%s↑%s ahead  ↓%s behind  ·  %s file(s) dirty%s\n\n' \
+        "$dim" "${ahead:-0}" "${behind:-0}" "${dirty:-0}" "$reset"
+    printf '%s── recent commits ──%s\n' "$dim" "$reset"
+    git -C "$dir" log -8 --color=always --format='%C(yellow)%h%Creset %s %C(dim)%cr%Creset' 2>/dev/null || true
+}
+
+# Internal: copy text to the clipboard (best-effort across platforms/WSL).
+_wt_copy() {
+    local text="$1" c
+    for c in pbcopy wl-copy xclip; do
+        command -v "$c" >/dev/null 2>&1 || continue
+        case "$c" in
+            xclip) printf '%s' "$text" | xclip -selection clipboard ;;
+            *)     printf '%s' "$text" | "$c" ;;
+        esac
+        return
+    done
+    for c in clip.exe /mnt/c/Windows/System32/clip.exe; do
+        if command -v "$c" >/dev/null 2>&1 || [ -x "$c" ]; then
+            printf '%s' "$text" | "$c"; return
+        fi
+    done
+    printf '%s\n' "$text"   # last resort: just print it
+}
+
+# Internal: open a branch's PR in the browser.
+_wt_prweb() {
+    local branch="$1" url
+    url=$( (cd "$REPO" && gh pr view "$branch" --json url --jq .url) 2>/dev/null ) || true
+    [ -z "$url" ] && { echo "No PR found for $branch"; return 0; }
+    if   command -v wslview  >/dev/null 2>&1; then wslview "$url"
+    elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$url"
+    else echo "$url"; fi
+}
+
+# Internal: remove a worktree by its actual dir (works for any source, not just
+# jt-managed trees whose path is derivable from the branch). Used by the UI.
+_wt_rm_dir() {
+    local dir="$1" branch="${2:-}"
+    [ -d "$dir" ] || { echo "No worktree at $dir"; return 0; }
+    local confirm
+    read -rp "Remove worktree $dir? [y/N] " confirm </dev/tty || return 0
+    [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Kept."; return 0; }
+    git -C "$REPO" worktree remove "$dir" 2>/dev/null \
+        || git -C "$REPO" worktree remove --force "$dir"
+    [ -n "$branch" ] && git -C "$REPO" branch -d "$branch" 2>/dev/null \
+        && echo "Deleted branch: $branch" || true
+    echo "Removed: $dir"
+}
+
+# New worktree from a blank branch, a GitHub issue, or a GitHub PR.
+cmd_worktree_new() {
+    echo "New worktree from:"
+    echo "  1) blank branch"
+    echo "  2) GitHub issue"
+    echo "  3) GitHub PR"
+    local kind; read -rp "Choice [1]: " kind </dev/tty || { echo "Aborted."; return 0; }
+    case "${kind:-1}" in
+        1|blank|b)
+            local br; read -rp "Branch name: " br </dev/tty || { echo "Aborted."; return 0; }
+            [ -z "$br" ] && { echo "Aborted."; return 0; }
+            cmd_worktree_create "$br"
+            ;;
+        2|issue|i) cmd_issue_start ;;   # picks an issue, seeds an agent preamble
+        3|pr|p)    cmd_pr_review ;;      # checks out the PR branch as a worktree
+        *)         echo "Aborted." ;;
+    esac
+}
+
+# Interactive fzf dashboard. Arrow keys to move; keys to act (see --header).
+cmd_worktree_ui() {
+    if ! command -v fzf >/dev/null 2>&1 || [ ! -t 1 ]; then
+        cmd_worktree_list; return
+    fi
+    local self; self=$(command -v jt 2>/dev/null) || true
+    [ -x "$self" ] || self="$0"
+
+    local out key sel kind dir branch
+    out=$(_wt_fzf_feed | fzf --ansi --delimiter=$'\t' --with-nth=1 \
+        --reverse --height=100% --no-sort --no-multi \
+        --header 'enter cd · c claude · e zed · n new · r remove · y copy · p PR · esc quit' \
+        --preview "$self worktree _preview {3} {5} {6} {7}" \
+        --preview-window 'right,46%,wrap,border-left' \
+        --bind "y:execute-silent($self worktree _copy {3})" \
+        --bind "p:execute-silent($self worktree _prweb {4})" \
+        --bind "r:execute($self worktree _rmdir {3} {4})+reload($self worktree _fzffeed)" \
+        --expect=enter,c,e,n) || true
+
+    key=$(printf '%s\n' "$out" | sed -n 1p)
+    sel=$(printf '%s\n' "$out" | sed -n 2p)
+    [ -z "$key" ] && return 0                       # esc / ctrl-c
+
+    if [ "$key" = "n" ]; then cmd_worktree_new; return; fi
+
+    kind=$(printf '%s' "$sel" | cut -f2)
+    dir=$(printf '%s' "$sel" | cut -f3)
+    branch=$(printf '%s' "$sel" | cut -f4)
+    [ "$kind" = "row" ] || { cmd_worktree_ui; return; }   # day header -> reopen
+
+    case "$key" in
+        enter)                                      # cd the parent shell in
+            if [ -n "${JT_CD_FILE:-}" ]; then printf '%s\n' "$dir" > "$JT_CD_FILE"; return; fi
+            cd "$dir"; exec "$SHELL" ;;
+        c)                                          # cd + launch claude
+            if [ -n "${JT_AGENT_FILE:-}" ]; then
+                [ -n "${JT_CD_FILE:-}" ] && printf '%s\n' "$dir" > "$JT_CD_FILE"
+                printf '%s\n' claude > "$JT_AGENT_FILE"
+                return
+            fi
+            cd "$dir"; exec_agent claude ;;
+        e)                                          # open in Zed (detached GUI)
+            local zed_cmd
+            if zed_cmd="$(find_zed)"; then
+                ("$zed_cmd" "$dir" >/dev/null 2>&1 &)
+                echo "Opening in Zed: $dir"
+            else
+                echo "zed/zeditor not found."
+            fi ;;
+    esac
 }
 
 cmd_worktree_remove() {
@@ -1298,10 +1491,15 @@ Most commands below fuzzy-pick (fzf, else a numbered menu) when you omit the
 argument in [brackets] — e.g. 'jt wt remove' lets you pick a worktree.
 
 Worktree (alias: wt):
+  jt wt                                Interactive dashboard (arrows to move; keys:
+                                       enter cd · c claude · e zed · n new · r remove
+                                       · y copy · p PR · esc quit)
   jt worktree create <branch>          Create a new worktree and branch
   jt worktree checkout [branch]        Create a worktree from an existing remote branch
                                        (pick from remote branches if none given)
-  jt worktree list                     List all worktrees
+  jt worktree new                      New worktree from a blank branch, issue, or PR
+  jt worktree list                     Static dashboard: worktrees grouped by day,
+                                       with PR state + title, newest first
   jt worktree open [branch]            cd into a worktree (pick if no branch)
   jt worktree edit [branch]            Open worktree in Zed (default: cwd)
   jt worktree setup [branch|path]      Copy env files + install deps (default: cwd)
@@ -1397,11 +1595,13 @@ HELP
 # ─── Main ──────────────────────────────────────────────────
 
 dispatch_worktree() {
-    local verb="${1:-list}"
+    local verb="${1:-ui}"        # bare 'jt wt' -> interactive dashboard
     shift 2>/dev/null || true
     case "$verb" in
+        ui|i)        cmd_worktree_ui ;;
         create)      cmd_worktree_create "${1:-}" ;;
         checkout|co) cmd_worktree_checkout "${1:-}" ;;
+        new)         cmd_worktree_new ;;
         list|ls)     cmd_worktree_list ;;
         open)        cmd_worktree_open "${1:-}" ;;
         edit)        cmd_worktree_edit "${1:-}" ;;
@@ -1409,6 +1609,12 @@ dispatch_worktree() {
         remove|rm)   cmd_worktree_remove "${1:-}" ;;
         cleanup)     cmd_worktree_cleanup ;;
         nuke)        cmd_worktree_nuke "${1:-}" ;;
+        # Internal verbs used by the fzf UI (preview / actions / reload feed).
+        _preview)    cmd_worktree_preview "$@" ;;
+        _fzffeed)    _wt_fzf_feed ;;
+        _copy)       _wt_copy "${1:-}" ;;
+        _prweb)      _wt_prweb "${1:-}" ;;
+        _rmdir)      _wt_rm_dir "${1:-}" "${2:-}" ;;
         *)           echo "Unknown worktree verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
     esac
 }
