@@ -665,7 +665,9 @@ cmd_worktree_sessions() {
     if [ "${#files[@]}" -eq 0 ]; then
         echo "No Claude sessions recorded in $dir"
         echo "(only sessions started at the worktree root are shown)"
-        read -rp "Press enter to go back… " _ </dev/tty 2>/dev/null || true
+        echo
+        echo "Press enter to go back…"
+        read -r _ </dev/tty 2>/dev/null || true
         return 0
     fi
 
@@ -720,19 +722,19 @@ cmd_worktree_ui() {
     local out key sel kind dir branch
     out=$(_wt_fzf_feed | fzf --ansi --delimiter=$'\t' --with-nth=1 \
         --reverse --height=100% --no-sort --no-multi \
-        --header 'enter cd · c claude · → sessions · e zed · n new · r remove · y copy · p PR · esc quit' \
+        --header 'type to filter · enter cd · → sessions · ⌥c claude · ⌥e zed · ⌥n new · ⌥r remove · ⌥y copy · ⌥p PR · esc quit' \
         --preview "$self worktree _preview {3} {5} {6} {7}" \
         --preview-window 'right,46%,wrap,border-left' \
-        --bind "y:execute-silent($self worktree _copy {3})" \
-        --bind "p:execute-silent($self worktree _prweb {4})" \
-        --bind "r:execute($self worktree _rmdir {3} {4})+reload($self worktree _fzffeed)" \
-        --expect=enter,c,e,n,right) || true
+        --bind "alt-y:execute-silent($self worktree _copy {3})" \
+        --bind "alt-p:execute-silent($self worktree _prweb {4})" \
+        --bind "alt-r:execute($self worktree _rmdir {3} {4})+reload($self worktree _fzffeed)" \
+        --expect=enter,alt-c,alt-e,alt-n,right) || true
 
     key=$(printf '%s\n' "$out" | sed -n 1p)
     sel=$(printf '%s\n' "$out" | sed -n 2p)
     [ -z "$key" ] && return 0                       # esc / ctrl-c
 
-    if [ "$key" = "n" ]; then cmd_worktree_new; return; fi
+    if [ "$key" = "alt-n" ]; then cmd_worktree_new; return; fi
 
     kind=$(printf '%s' "$sel" | cut -f2)
     dir=$(printf '%s' "$sel" | cut -f3)
@@ -745,14 +747,14 @@ cmd_worktree_ui() {
         enter)                                      # cd the parent shell in
             if [ -n "${JT_CD_FILE:-}" ]; then printf '%s\n' "$dir" > "$JT_CD_FILE"; return; fi
             cd "$dir"; exec "$SHELL" ;;
-        c)                                          # cd + launch claude
+        alt-c)                                      # cd + launch claude
             if [ -n "${JT_AGENT_FILE:-}" ]; then
                 [ -n "${JT_CD_FILE:-}" ] && printf '%s\n' "$dir" > "$JT_CD_FILE"
                 printf '%s\n' claude > "$JT_AGENT_FILE"
                 return
             fi
             cd "$dir"; exec_agent claude ;;
-        e)                                          # open in Zed (detached GUI)
+        alt-e)                                      # open in Zed (detached GUI)
             local zed_cmd
             if zed_cmd="$(find_zed)"; then
                 ("$zed_cmd" "$dir" >/dev/null 2>&1 &)
@@ -1577,9 +1579,9 @@ Most commands below fuzzy-pick (fzf, else a numbered menu) when you omit the
 argument in [brackets] — e.g. 'jt wt remove' lets you pick a worktree.
 
 Worktree (alias: wt):
-  jt wt                                Interactive dashboard (arrows to move; keys:
-                                       enter cd · c claude · → Claude sessions (resume)
-                                       · e zed · n new · r remove · y copy · p PR · esc)
+  jt wt                                Interactive dashboard (type to filter; keys:
+                                       enter cd · → Claude sessions (resume) · ⌥c claude
+                                       · ⌥e zed · ⌥n new · ⌥r remove · ⌥y copy · ⌥p PR · esc)
   jt worktree create <branch>          Create a new worktree and branch
   jt worktree checkout [branch]        Create a worktree from an existing remote branch
                                        (pick from remote branches if none given)
