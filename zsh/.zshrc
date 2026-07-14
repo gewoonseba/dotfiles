@@ -206,5 +206,24 @@ jt() {
 }
 
 
+# Open the current directory in Zed as a remote-SSH project. Only active inside
+# a cmux remote workspace (the remote box has no local `zed`). cmux doesn't track
+# a remote workspace's cwd, so instead the remote shell — which DOES know its path
+# — emits a ⌘-clickable OSC 8 link; cmux hands the zed:// URL to macOS, which opens
+# it in Zed over SSH. Works from any worktree jt drops you into. `zed [subdir]`.
+if [[ -n "$CMUX_WORKSPACE_ID" ]] && ! command -v zed &> /dev/null; then
+  zed() {
+    emulate -L zsh
+    local dir="${1:-$PWD}"; [[ "$dir" = /* ]] || dir="$PWD/$dir"
+    local dest="${USER}@100.92.46.91:2222"   # fallback if SSH_CONNECTION is unset
+    if [[ -n "$SSH_CONNECTION" ]]; then
+      local p=(${(s: :)SSH_CONNECTION}); dest="${USER}@${p[3]}:${p[4]}"
+    fi
+    printf '\e]8;;zed://ssh/%s%s\e\\󰏫 Open %s in Zed  (⌘-click)\e]8;;\e\\\n' \
+      "$dest" "$dir" "${dir:t}"
+  }
+fi
+
+
 # Added by Antigravity CLI installer
 export PATH="/home/gewoonseba/.local/bin:$PATH"
