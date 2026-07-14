@@ -516,6 +516,16 @@ cmd_worktree_list() {
     printf '\n%s● open  ◐ draft  ● merged  ● closed  ○ no PR%s\n' "$dim" "$reset"
 }
 
+# Path to the dashboard feed cache. A fixed per-user path (not $$-based) so the
+# fzf 'reload' subprocess (_fzffeed) and the parent UI process share one file:
+# the UI builds the feed once, reuses it across the sessions drill-in round-trip
+# so returning is instant, and 'Ctrl-X' remove rewrites it in place via _fzffeed.
+_wt_feed_cache() {
+    local d="${XDG_CACHE_HOME:-$HOME/.cache}/jt"
+    mkdir -p "$d" 2>/dev/null || d="${TMPDIR:-/tmp}"
+    printf '%s/wt-feed' "$d"
+}
+
 # Internal: feed lines for the fzf UI. Fields (TAB-separated):
 #   1 visible(colored)  2 kind(row|header)  3 dir  4 branch  5 prstate  6 prnum  7 prtitle
 _wt_fzf_feed() {
@@ -591,19 +601,45 @@ _wt_prweb() {
     else echo "$url"; fi
 }
 
-# Internal: remove a worktree by its actual dir (works for any source, not just
-# jt-managed trees whose path is derivable from the branch). Used by the UI.
-_wt_rm_dir() {
-    local dir="$1" branch="${2:-}"
-    [ -d "$dir" ] || { echo "No worktree at $dir"; return 0; }
+# Internal: open a worktree in Zed (detached GUI). No-op if zed isn't found.
+_wt_zed() {
+    local dir="${1:-}" zed_cmd
+    [ -d "$dir" ] || return 0
+    zed_cmd="$(find_zed)" || return 0
+    ("$zed_cmd" "$dir" >/dev/null 2>&1 &)
+}
+
+# Internal: remove one or more worktrees by their actual dirs (works for any
+# source, not just jt-managed trees whose path is derivable from the branch).
+# Called by the UI with the TAB-marked rows' dirs (or the highlighted row's dir
+# when nothing is marked). Confirms once for the whole batch. The main checkout
+# ($REPO) is never removed. Its branch is resolved per-dir and deleted too.
+_wt_rm_multi() {
+    local dirs=() d
+    for d in "$@"; do
+        [ -d "$d" ] || continue                     # skip blanks / day headers
+        [ "$d" = "$REPO" ] && { echo "Skipping main checkout: $d"; continue; }
+        dirs+=("$d")
+    done
+    [ "${#dirs[@]}" -eq 0 ] && { echo "Nothing to remove."; return 0; }
+
+    echo "Remove ${#dirs[@]} worktree(s)?"
+    for d in "${dirs[@]}"; do printf '  %s\n' "$d"; done
     local confirm
-    read -rp "Remove worktree $dir? [y/N] " confirm </dev/tty || return 0
+    read -rp "Proceed? [y/N] " confirm </dev/tty || return 0
     [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Kept."; return 0; }
-    git -C "$REPO" worktree remove "$dir" 2>/dev/null \
-        || git -C "$REPO" worktree remove --force "$dir"
-    [ -n "$branch" ] && git -C "$REPO" branch -d "$branch" 2>/dev/null \
-        && echo "Deleted branch: $branch" || true
-    echo "Removed: $dir"
+
+    local branch
+    for d in "${dirs[@]}"; do
+        branch="$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null)" || branch=""
+        git -C "$REPO" worktree remove "$d" 2>/dev/null \
+            || git -C "$REPO" worktree remove --force "$d"
+        [ -n "$branch" ] && [ "$branch" != HEAD ] \
+            && git -C "$REPO" branch -d "$branch" 2>/dev/null \
+            && echo "Deleted branch: $branch" || true
+        echo "Removed: $d"
+    done
+    read -rp "Press enter to continue… " _ </dev/tty 2>/dev/null || true
 }
 
 # New worktree from a blank branch, a GitHub issue, or a GitHub PR.
@@ -719,50 +755,61 @@ cmd_worktree_ui() {
     local self; self=$(command -v jt 2>/dev/null) || true
     [ -x "$self" ] || self="$0"
 
+    # Build the (network-backed) feed once, then loop over the cached copy.
+    # Drilling into sessions and coming back reuses this file — no rebuild — so
+    # the redraw is instant. 'Ctrl-X' remove rewrites the file in place (its
+    # +reload runs _fzffeed, which tees back into the cache), so a removed
+    # worktree is gone on the next redraw without a full recompute here.
+    local cache; cache="$(_wt_feed_cache)"
+    _wt_fzf_feed > "$cache"
+
+    # Verbs are Ctrl-chords (never collide with type-to-filter, unlike bare
+    # letters, and don't emit stray chars like Alt does under WSL/Windows
+    # terminals). Self-contained actions (zed/copy/PR/remove/refresh) run inside
+    # fzf via execute*/reload; the ones that hand off the parent shell (cd,
+    # claude, new) or open a sub-picker (sessions) exit via --expect. Tab marks
+    # rows (--multi); Ctrl-X removes every marked row (or the highlighted one).
     local out key sel kind dir branch
-    out=$(_wt_fzf_feed | fzf --ansi --delimiter=$'\t' --with-nth=1 \
-        --reverse --height=100% --no-sort --no-multi \
-        --header 'type to filter · enter cd · → sessions · ⌥c claude · ⌥e zed · ⌥n new · ⌥r remove · ⌥y copy · ⌥p PR · esc quit' \
-        --preview "$self worktree _preview {3} {5} {6} {7}" \
-        --preview-window 'right,46%,wrap,border-left' \
-        --bind "alt-y:execute-silent($self worktree _copy {3})" \
-        --bind "alt-p:execute-silent($self worktree _prweb {4})" \
-        --bind "alt-r:execute($self worktree _rmdir {3} {4})+reload($self worktree _fzffeed)" \
-        --expect=enter,alt-c,alt-e,alt-n,right) || true
+    while :; do
+        out=$(fzf --ansi --delimiter=$'\t' --with-nth=1 \
+            --reverse --height=100% --no-sort --multi --marker='✓' \
+            --header 'type to filter · ↑↓ move · TAB mark · ENTER cd · Ctrl-O claude · Ctrl-E zed
+→ sessions · Ctrl-X remove · Ctrl-Y copy · Ctrl-P PR · Ctrl-T new · Ctrl-R refresh · ESC quit' \
+            --preview "$self worktree _preview {3} {5} {6} {7}" \
+            --preview-window 'right,46%,wrap,border-left' \
+            --bind "ctrl-e:execute-silent($self worktree _zed {3})" \
+            --bind "ctrl-y:execute-silent($self worktree _copy {3})" \
+            --bind "ctrl-p:execute-silent($self worktree _prweb {4})" \
+            --bind "ctrl-x:execute($self worktree _rmmulti {+3})+reload($self worktree _fzffeed)" \
+            --bind "ctrl-r:reload($self worktree _fzffeed)" \
+            --expect=enter,ctrl-o,ctrl-t,right < "$cache") || true
 
-    key=$(printf '%s\n' "$out" | sed -n 1p)
-    sel=$(printf '%s\n' "$out" | sed -n 2p)
-    [ -z "$key" ] && return 0                       # esc / ctrl-c
+        key=$(printf '%s\n' "$out" | sed -n 1p)
+        sel=$(printf '%s\n' "$out" | sed -n 2p)     # first marked row, else current
+        [ -z "$key" ] && return 0                   # esc / ctrl-c
 
-    if [ "$key" = "alt-n" ]; then cmd_worktree_new; return; fi
+        if [ "$key" = "ctrl-t" ]; then cmd_worktree_new; return; fi
 
-    kind=$(printf '%s' "$sel" | cut -f2)
-    dir=$(printf '%s' "$sel" | cut -f3)
-    branch=$(printf '%s' "$sel" | cut -f4)
-    [ "$kind" = "row" ] || { cmd_worktree_ui; return; }   # day header -> reopen
+        kind=$(printf '%s' "$sel" | cut -f2)
+        dir=$(printf '%s' "$sel" | cut -f3)
+        branch=$(printf '%s' "$sel" | cut -f4)
+        [ "$kind" = "row" ] || continue             # day header -> reopen (cached)
 
-    case "$key" in
-        right)                                      # drill into Claude sessions
-            cmd_worktree_sessions "$dir"; cmd_worktree_ui; return ;;
-        enter)                                      # cd the parent shell in
-            if [ -n "${JT_CD_FILE:-}" ]; then printf '%s\n' "$dir" > "$JT_CD_FILE"; return; fi
-            cd "$dir"; exec "$SHELL" ;;
-        alt-c)                                      # cd + launch claude
-            if [ -n "${JT_AGENT_FILE:-}" ]; then
-                [ -n "${JT_CD_FILE:-}" ] && printf '%s\n' "$dir" > "$JT_CD_FILE"
-                printf '%s\n' claude > "$JT_AGENT_FILE"
-                return
-            fi
-            cd "$dir"; exec_agent claude ;;
-        alt-e)                                      # open in Zed (detached GUI)
-            local zed_cmd
-            if zed_cmd="$(find_zed)"; then
-                ("$zed_cmd" "$dir" >/dev/null 2>&1 &)
-                echo "Opening in Zed: $dir"
-            else
-                echo "zed/zeditor not found."
-            fi ;;
-    esac
+        case "$key" in
+            right)                                  # drill into Claude sessions
+                cmd_worktree_sessions "$dir"; continue ;;   # back -> reuse cache
+            enter)                                  # cd the parent shell in
+                if [ -n "${JT_CD_FILE:-}" ]; then printf '%s\n' "$dir" > "$JT_CD_FILE"; return; fi
+                cd "$dir"; exec "$SHELL" ;;
+            ctrl-o)                                 # cd + launch claude
+                if [ -n "${JT_AGENT_FILE:-}" ]; then
+                    [ -n "${JT_CD_FILE:-}" ] && printf '%s\n' "$dir" > "$JT_CD_FILE"
+                    printf '%s\n' claude > "$JT_AGENT_FILE"
+                    return
+                fi
+                cd "$dir"; exec_agent claude ;;
+        esac
+    done
 }
 
 cmd_worktree_remove() {
@@ -1579,9 +1626,11 @@ Most commands below fuzzy-pick (fzf, else a numbered menu) when you omit the
 argument in [brackets] — e.g. 'jt wt remove' lets you pick a worktree.
 
 Worktree (alias: wt):
-  jt wt                                Interactive dashboard (type to filter; keys:
-                                       enter cd · → Claude sessions (resume) · ⌥c claude
-                                       · ⌥e zed · ⌥n new · ⌥r remove · ⌥y copy · ⌥p PR · esc)
+  jt wt                                Interactive dashboard (type to filter; Tab marks
+                                       rows; keys: enter cd · Ctrl-O claude · Ctrl-E zed
+                                       · → Claude sessions (resume) · Ctrl-X remove marked
+                                       · Ctrl-Y copy · Ctrl-P PR · Ctrl-T new · Ctrl-R
+                                       refresh · esc)
   jt worktree create <branch>          Create a new worktree and branch
   jt worktree checkout [branch]        Create a worktree from an existing remote branch
                                        (pick from remote branches if none given)
@@ -1700,10 +1749,11 @@ dispatch_worktree() {
         # Internal verbs used by the fzf UI (preview / actions / reload feed).
         _preview)    cmd_worktree_preview "$@" ;;
         _sesspreview) cmd_session_preview "${1:-}" ;;
-        _fzffeed)    _wt_fzf_feed ;;
+        _fzffeed)    _wt_fzf_feed | tee "$(_wt_feed_cache)" ;;
         _copy)       _wt_copy "${1:-}" ;;
         _prweb)      _wt_prweb "${1:-}" ;;
-        _rmdir)      _wt_rm_dir "${1:-}" "${2:-}" ;;
+        _zed)        _wt_zed "${1:-}" ;;
+        _rmmulti)    _wt_rm_multi "$@" ;;
         *)           echo "Unknown worktree verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
     esac
 }
