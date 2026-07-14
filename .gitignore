@@ -26,4 +26,8 @@ Thumbs.db
 .Spotlight-V100
 .Trashes
 
+# Machine-local data — never committed (repo is public). e.g. reviewer rosters
+# mapping teammates to internal Slack IDs. See agents/.agents/skills/ship-pr.
+*.local.md
+
 scripts/.local/bin/javm
