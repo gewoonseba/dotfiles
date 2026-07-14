@@ -7,6 +7,7 @@
 // custom settings, run `zed: open default settings` from the
 // command palette (cmd-shift-p / ctrl-shift-p)
 {
+  "diff_view_style": "unified",
   "ssh_connections": [
     {
       "host": "pc-seba-1",
@@ -15,38 +16,32 @@
       "args": [],
       "projects": [
         {
-          "paths": [
-            "/home/gewoonseba"
-          ]
+          "paths": ["/home/gewoonseba"],
         },
         {
-          "paths": [
-            "/home/gewoonseba/.hermes"
-          ]
+          "paths": ["/home/gewoonseba/.hermes"],
         },
         {
-          "paths": [
-            "/home/gewoonseba/work/notes"
-          ]
-        }
-      ]
-    }
+          "paths": ["/home/gewoonseba/work/notes"],
+        },
+      ],
+    },
   ],
   "cli_default_open_behavior": "existing_window",
   "outline_panel": {
-    "dock": "right"
+    "dock": "right",
   },
   "collaboration_panel": {
-    "dock": "right"
+    "dock": "right",
   },
   "agent": {
     "auto_compact": {
-      "threshold": "90%"
+      "threshold": "90%",
     },
     "dock": "left",
     "favorite_models": [],
     "notify_when_agent_waiting": "never",
-    "model_parameters": []
+    "model_parameters": [],
   },
   "git_panel": {
     "dock": "right",
@@ -58,21 +53,19 @@
   },
   "agent_servers": {
     "codex-acp": {
-      "type": "registry"
+      "type": "registry",
     },
     "claude-acp": {
       "favorite_config_option_values": {
-        "model": [
-          "claude-opus-4-8"
-        ]
+        "model": ["claude-opus-4-8"],
       },
       "default_config_options": {
         "effort": "xhigh",
-        "model": "claude-opus-4-8"
+        "model": "claude-opus-4-8",
       },
       "type": "registry",
-      "default_model": "default"
-    }
+      "default_model": "default",
+    },
   },
   "terminal": {
     "shell": {
@@ -103,7 +96,7 @@
   "theme": {
     "mode": "system",
     "light": "One Light",
-    "dark": "One Dark"
+    "dark": "One Dark",
   },
   "format_on_save": "on",
   "languages": {
@@ -145,16 +138,16 @@
       "settings": {
         "typescript": {
           "updateImportsOnFileMove": {
-            "enabled": "always"
-          }
+            "enabled": "always",
+          },
         },
         "javascript": {
           "updateImportsOnFileMove": {
-            "enabled": "always"
-          }
-        }
+            "enabled": "always",
+          },
+        },
       },
-      "enable_lsp_tasks": true
+      "enable_lsp_tasks": true,
     },
     "ruff": {
       "settings": {

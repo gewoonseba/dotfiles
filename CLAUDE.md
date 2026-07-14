@@ -79,6 +79,7 @@ stow -D folder-name       # Remove symlinks (destow)
 
 - **agents/**: Shared agent skills for Claude Code, Codex, and Antigravity (see below)
 - **claude/**: Claude Code settings and commands (skills live in `agents/`)
+- **cmux/**: cmux terminal app config (`~/.config/cmux/cmux.json`) — macOS desktop-only, stowed manually like `ghostty`
 - **cursor/**: Cursor IDE (shared configs)
   - `.config/Cursor/User/settings.json`
   - `.config/Cursor/User/keybindings.json`

@@ -100,6 +100,9 @@ alias gcm='git commit -m'
 alias gcam='git commit -a -m'
 alias gcad='git commit -a --amend'
 
+# cmux: open a new remote-SSH workspace on the home server (Tailscale)
+alias remote='cmux ssh gewoonseba@100.92.46.91 --port 2222'
+
 # Historty
 HISTFILE=~/.zsh_history
 HISTSIZE=50000
