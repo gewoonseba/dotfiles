@@ -1,4 +1,14 @@
 #!/usr/bin/env bash
+# Re-exec under bash 4+ if needed. macOS ships bash 3.2, which lacks associative
+# arrays (declare -A); this script relies on them (e.g. _wt_collect's PR maps).
+# Homebrew installs a modern bash at one of the paths below.
+if [ -z "${BASH_VERSINFO:-}" ] || [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
+    for _b in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+        [ -x "$_b" ] && exec "$_b" "$0" "$@"
+    done
+    echo "jt: requires bash 4+ (macOS ships 3.2). Install with: brew install bash" >&2
+    exit 1
+fi
 set -euo pipefail
 
 # jt — Jolteon worktree & service manager
