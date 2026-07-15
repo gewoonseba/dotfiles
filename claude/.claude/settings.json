@@ -41,7 +41,28 @@
     "defaultMode": "auto"
   },
   "model": "opus",
-  "hooks": {},
+  "hooks": {
+    "WorktreeCreate": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.local/bin/claude-hook-worktree-create.sh\""
+          }
+        ]
+      }
+    ],
+    "WorktreeRemove": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.local/bin/claude-hook-worktree-remove.sh\""
+          }
+        ]
+      }
+    ]
+  },
   "statusLine": {
     "type": "command",
     "command": "input=$(cat); current_dir=$(echo \"$input\" | jq -r '.workspace.current_dir'); model=$(echo \"$input\" | jq -r '.model.display_name'); printf \"\\e[36m➜\\e[0m  \\e[1m%s\\e[0m \\e[32m%s\\e[0m\" \"$(basename \"$current_dir\")\" \"$model\""
