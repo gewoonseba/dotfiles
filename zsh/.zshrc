@@ -164,11 +164,14 @@ jt() {
 
 
 # Open the current directory in Zed as a remote-SSH project. Only active inside
-# a cmux remote workspace (the remote box has no local `zed`). cmux doesn't track
-# a remote workspace's cwd, so instead the remote shell — which DOES know its path
-# — emits a ⌘-clickable OSC 8 link; cmux hands the zed:// URL to macOS, which opens
-# it in Zed over SSH. Works from any worktree jt drops you into. `zed [subdir]`.
-if [[ -n "$CMUX_WORKSPACE_ID" ]] && ! command -v zed &> /dev/null; then
+# a cmux or Herdr remote session on a non-macOS box — launching Zed's GUI on a
+# headless remote does nothing (even when a `zed` binary is installed there), so
+# we shadow it. Neither cmux nor Herdr tracks a remote session's cwd, so instead
+# the remote shell — which DOES know its path — emits a ⌘-clickable OSC 8 link;
+# the local Mac client hands the zed:// URL to macOS, which opens it in Zed over
+# SSH. On the Mac itself ($OSTYPE = darwin*) the real `zed` is used. Works from
+# any worktree jt drops you into. `zed [subdir]`.
+if { [[ -n "$CMUX_WORKSPACE_ID" ]] || [[ "$HERDR_ENV" == 1 ]]; } && [[ "$OSTYPE" != darwin* ]]; then
   zed() {
     emulate -L zsh
     local dir="${1:-$PWD}"; [[ "$dir" = /* ]] || dir="$PWD/$dir"
