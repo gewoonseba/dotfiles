@@ -223,7 +223,7 @@ fi
 # (ghostty, hypr, cursor*, zed) can't run headless and are excluded on WSL —
 # editing is done from the Windows host (e.g. Cursor/VS Code over Remote-WSL).
 # Skills are handled separately by the agents-sync-skills step below.
-STOW_FOLDERS="zsh tmux starship claude scripts"
+STOW_FOLDERS="zsh tmux starship claude herdr scripts"
 
 # ~/.claude holds live runtime state (credentials, history). Stowing claude only
 # folds in settings.json and leaves runtime files alone. Back up a pre-existing
@@ -231,6 +231,14 @@ STOW_FOLDERS="zsh tmux starship claude scripts"
 if [ -f "$HOME/.claude/settings.json" ] && [ ! -L "$HOME/.claude/settings.json" ]; then
     echo "  Backing up existing ~/.claude/settings.json → settings.json.pre-stow.bak"
     mv "$HOME/.claude/settings.json" "$HOME/.claude/settings.json.pre-stow.bak"
+fi
+
+# Herdr writes a real config.toml at runtime next to its sockets/logs. Stowing
+# herdr only folds in config.toml and leaves runtime files alone. Back up a
+# pre-existing *real* config.toml so `stow herdr` won't abort on a conflict.
+if [ -f "$HOME/.config/herdr/config.toml" ] && [ ! -L "$HOME/.config/herdr/config.toml" ]; then
+    echo "  Backing up existing ~/.config/herdr/config.toml → config.toml.pre-stow.bak"
+    mv "$HOME/.config/herdr/config.toml" "$HOME/.config/herdr/config.toml.pre-stow.bak"
 fi
 
 for folder in $STOW_FOLDERS; do

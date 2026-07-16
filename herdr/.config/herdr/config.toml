@@ -1,0 +1,10 @@
+# herdr configuration — https://herdr.dev
+# See `herdr --default-config` for the full set of options.
+
+[worktrees]
+# Root directory for Git worktree checkouts created from the sidebar.
+# Herdr creates checkouts under <directory>/<repo>/<branch-slug>.
+directory = "~/work/worktrees"
+
+[ui]
+agent_panel_sort = "spaces"
