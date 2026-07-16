@@ -1260,7 +1260,7 @@ cmd_app_stop() {
 # at localhost here. Run this on your local machine (e.g. your Mac). Relies on a
 # 'Host wsl' entry in ~/.ssh/config for the connection (host, port, user, key).
 cmd_app_forward() {
-    local host="wsl"
+    local host="devbox"
     local -a ports=(3000 5173 8000 8002)
 
     # SSH can't bind a local port that's already taken; warn before connecting.

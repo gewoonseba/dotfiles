@@ -10,6 +10,16 @@
       "keywords": ["ssh", "remote", "home", "server"],
       "commandName": "Remote Home Server",
       "icon": { "type": "symbol", "name": "server.rack" }
+    },
+    "open-in-zed": {
+      "type": "command",
+      "title": "Open in Zed (remote)",
+      "subtitle": "Run the `zed` helper in the current terminal → ⌘-click the link",
+      "keywords": ["zed", "editor", "remote", "ssh", "open"],
+      "command": "zed",
+      "target": "currentTerminal",
+      "shortcut": "cmd+shift+z",
+      "icon": { "type": "symbol", "name": "chevron.left.forwardslash.chevron.right" }
     }
   },
 

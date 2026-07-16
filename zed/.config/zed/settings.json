@@ -16,16 +16,27 @@
       "args": [],
       "projects": [
         {
-          "paths": ["/home/gewoonseba"],
+          "paths": [
+            "/home/gewoonseba"
+          ]
         },
         {
-          "paths": ["/home/gewoonseba/.hermes"],
+          "paths": [
+            "/home/gewoonseba/.hermes"
+          ]
         },
         {
-          "paths": ["/home/gewoonseba/work/notes"],
+          "paths": [
+            "/home/gewoonseba/work/Companion-Contract-Management"
+          ]
         },
-      ],
-    },
+        {
+          "paths": [
+            "/home/gewoonseba/work/notes"
+          ]
+        }
+      ]
+    }
   ],
   "cli_default_open_behavior": "existing_window",
   "outline_panel": {
