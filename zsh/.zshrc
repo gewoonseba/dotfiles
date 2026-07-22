@@ -124,14 +124,16 @@ export PATH="/Users/sebastianstoelen/.local/bin:$PATH"
 # real zsh context (aliases, prompt, env) and makes the cd land in the right
 # order.
 jt() {
-  local cd_file agent_file prompt_file rc target agent prompt
+  local cd_file agent_file prompt_file args_file rc target agent prompt
   cd_file=$(mktemp -t jt-cd 2>/dev/null) || cd_file="${TMPDIR:-/tmp}/jt-cd.$$"
   agent_file=$(mktemp -t jt-agent 2>/dev/null) || agent_file="${TMPDIR:-/tmp}/jt-agent.$$"
   prompt_file=$(mktemp -t jt-prompt 2>/dev/null) || prompt_file="${TMPDIR:-/tmp}/jt-prompt.$$"
+  args_file=$(mktemp -t jt-args 2>/dev/null) || args_file="${TMPDIR:-/tmp}/jt-args.$$"
   : > "$cd_file"
   : > "$agent_file"
   : > "$prompt_file"
-  JT_CD_FILE="$cd_file" JT_AGENT_FILE="$agent_file" JT_PROMPT_FILE="$prompt_file" command jt "$@"
+  : > "$args_file"
+  JT_CD_FILE="$cd_file" JT_AGENT_FILE="$agent_file" JT_PROMPT_FILE="$prompt_file" JT_ARGS_FILE="$args_file" command jt "$@"
   rc=$?
   if [ -s "$cd_file" ]; then
     target=$(<"$cd_file")
@@ -141,10 +143,16 @@ jt() {
     agent=$(<"$agent_file")
     prompt=""
     [ -s "$prompt_file" ] && prompt=$(<"$prompt_file")
-    rm -f "$cd_file" "$agent_file" "$prompt_file"
+    # Explicit args (one per line, e.g. --resume <id>) take precedence over a
+    # prompt — used by the 'jt wt' sessions drill-in to resume a conversation.
+    local -a extra_args
+    [ -s "$args_file" ] && extra_args=("${(f)$(<"$args_file")}")
+    rm -f "$cd_file" "$agent_file" "$prompt_file" "$args_file"
     if command -v "$agent" >/dev/null 2>&1; then
+      if [ "${#extra_args[@]}" -gt 0 ]; then
+        "$agent" "${extra_args[@]}"
       # claude/codex take the prompt positionally; agy needs -i.
-      if [ -n "$prompt" ]; then
+      elif [ -n "$prompt" ]; then
         case "$agent" in
           agy) "$agent" -i "$prompt" ;;
           *)   "$agent" "$prompt" ;;
@@ -158,7 +166,7 @@ jt() {
       return 1
     fi
   fi
-  rm -f "$cd_file" "$agent_file" "$prompt_file"
+  rm -f "$cd_file" "$agent_file" "$prompt_file" "$args_file"
   return $rc
 }
 

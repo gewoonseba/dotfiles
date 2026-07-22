@@ -752,7 +752,21 @@ cmd_worktree_sessions() {
     [ -n "$id2" ] || return 0
 
     command -v claude >/dev/null 2>&1 || { echo "claude not found in PATH."; return 0; }
-    # Land back in the worktree after Claude exits (wrapper reads JT_CD_FILE).
+    # Prefer handing cd + launch back to the zsh wrapper: it runs 'builtin cd' in
+    # the user's real shell — so the shell re-emits its cwd (OSC 7) and Herdr's
+    # sidebar path follows into the worktree — before starting claude. execing
+    # claude here instead resumes in the right dir but leaves the parent shell
+    # (and thus Herdr's path display) pointing at the old cwd. Needs JT_ARGS_FILE
+    # so the wrapper passes '--resume <id>'; without it, deferring would launch a
+    # fresh claude, so fall back to the direct exec. exit (not return) so jt fully
+    # hands off — a return would bounce back into the dashboard loop.
+    if [ -n "${JT_AGENT_FILE:-}" ] && [ -n "${JT_ARGS_FILE:-}" ]; then
+        [ -n "${JT_CD_FILE:-}" ] && printf '%s\n' "$dir" > "$JT_CD_FILE"
+        printf '%s\n' claude > "$JT_AGENT_FILE"
+        printf '%s\n%s\n' --resume "$id2" > "$JT_ARGS_FILE"
+        exit 0
+    fi
+    # Fallback (no wrapper): cd + exec directly. Lands back via JT_CD_FILE.
     [ -n "${JT_CD_FILE:-}" ] && printf '%s\n' "$dir" > "$JT_CD_FILE"
     cd "$dir"
     exec claude --resume "$id2"
