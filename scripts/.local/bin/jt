@@ -1275,7 +1275,10 @@ cmd_app_stop() {
 # 'Host wsl' entry in ~/.ssh/config for the connection (host, port, user, key).
 cmd_app_forward() {
     local host="devbox"
-    local -a ports=(3000 5173 8000 8002)
+    # 8140 = agent-service ("My Companion" AI assistant). Its own docker Postgres
+    # (5433) and the analytics MCP (8003) it calls are server-side only, so only
+    # the HTTP port the browser hits needs tunnelling.
+    local -a ports=(3000 5173 8000 8002 8140)
 
     # SSH can't bind a local port that's already taken; warn before connecting.
     local -a busy=()
@@ -1529,6 +1532,118 @@ cmd_mcp_stop() {
     fi
 }
 
+# ─── Agent-service commands ────────────────────────────────
+#
+# The "My Companion" in-product AI assistant. Unlike the other services it's a
+# standalone uv project (own uv.lock, excluded from the workspace so it can pin
+# a current anthropic) and owns its OWN Postgres via docker compose — never the
+# Jolteon DB. It loads config from its own services/agent-service/.env
+# (pydantic-settings, env_file=".env"), so we cd into the dir and let it read
+# that file; ANTHROPIC_API_KEY is the one secret you must supply. See its
+# .env.example for the full list.
+
+# Resolve the agent-service dir (current worktree first, then the main checkout).
+agent_service_dir() {
+    (cd services/agent-service 2>/dev/null && pwd) || printf '%s\n' "$REPO/services/agent-service"
+}
+
+cmd_agent_run() {
+    local port="8140"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --port) port="${2:-}"; [ -z "$port" ] && { echo "--port needs a value"; exit 1; }; shift 2 ;;
+            *)      echo "Unknown argument: $1"; echo "Usage: jt agent run [--port N]"; exit 1 ;;
+        esac
+    done
+
+    local agent_dir; agent_dir="$(agent_service_dir)"
+    if [ ! -d "$agent_dir" ]; then
+        echo "Error: $agent_dir not found."
+        echo "The agent-service isn't in this checkout yet (still on a feature branch?)."
+        echo "Run this from a worktree that has services/agent-service."
+        exit 1
+    fi
+
+    # Config: the service reads its own .env from CWD. Seed it from .env.example
+    # on first run, then flag the one secret that must be filled in.
+    local env_file="$agent_dir/.env"
+    if [ ! -f "$env_file" ]; then
+        if [ -f "$agent_dir/.env.example" ]; then
+            cp "$agent_dir/.env.example" "$env_file"
+            echo "Created $env_file from .env.example."
+        else
+            echo "Warning: no .env or .env.example in $agent_dir."
+        fi
+    fi
+    # Warn (don't block): the service starts fine without a key, but chat calls
+    # fail until ANTHROPIC_API_KEY is set to a non-empty value.
+    if ! grep -qE '^ANTHROPIC_API_KEY=.+' "$env_file" 2>/dev/null; then
+        echo ""
+        echo "⚠  ANTHROPIC_API_KEY is not set in $env_file"
+        echo "   Add your key there before using the chat:"
+        echo "     ANTHROPIC_API_KEY=sk-ant-..."
+        echo ""
+    fi
+
+    # The service connects to its own docker Postgres on host port 5433. Bring it
+    # up (idempotent); continue without aborting if docker is missing or fails.
+    if command -v docker >/dev/null 2>&1; then
+        echo "Starting agent-service database (docker compose)..."
+        docker compose -f "$agent_dir/compose.yaml" up -d --wait 2>/dev/null \
+            || docker compose -f "$agent_dir/compose.yaml" up -d \
+            || echo "Warning: could not start the agent DB (continuing — the service will fail to connect)."
+    else
+        echo "Warning: docker not found — start the agent DB yourself, then re-run:"
+        echo "  docker compose -f $agent_dir/compose.yaml up -d"
+    fi
+
+    # Free the port so a re-run just works (mirrors 'jt mcp run').
+    local pids
+    pids=$(lsof -ti :"$port" 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+        echo "$pids" | xargs kill -9 2>/dev/null || true
+        sleep 1
+    fi
+
+    echo ""
+    echo "Starting agent-service..."
+    echo "  Service:        http://localhost:$port"
+    echo "  Database:       postgresql://agent:agent@localhost:5433/agent (docker)"
+    echo "  Analytics MCP:  ANALYTICS_MCP_URL from .env (default http://localhost:8003/mcp)"
+    echo ""
+    echo "Viewing from another machine (e.g. your Mac)? Run 'jt app forward' there"
+    echo "to tunnel port $port, then open http://localhost:$port."
+    echo ""
+
+    trap 'echo ""; echo "Stopping agent-service..."; kill 0' INT TERM
+
+    (cd "$agent_dir" && uv run uvicorn app.main:app --port "$port") &
+    wait
+}
+
+cmd_agent_stop() {
+    local port="8140"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --port) port="${2:-}"; [ -z "$port" ] && { echo "--port needs a value"; exit 1; }; shift 2 ;;
+            *)      echo "Unknown argument: $1"; echo "Usage: jt agent stop [--port N]"; exit 1 ;;
+        esac
+    done
+
+    local pids
+    pids=$(lsof -ti :"$port" 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+        echo "$pids" | xargs kill -9 2>/dev/null || true
+        echo "Stopped agent-service (port $port)"
+    else
+        echo "No agent-service running on port $port."
+    fi
+    # The docker Postgres is left running on purpose (data persists, faster
+    # restarts). Stop it explicitly when you want it gone:
+    echo "Agent DB left running. Stop it with:"
+    echo "  docker compose -f $(agent_service_dir)/compose.yaml down"
+}
+
 # ─── Browser commands ──────────────────────────────────────
 
 cmd_browser_open() {
@@ -1691,12 +1806,20 @@ App (backend + frontend):
                                        (root/partner/customer/…, defined in
                                        ~/.config/jt/environments.sh) against the env's DB.
   jt app stop                          Stop backend + frontend
-  jt app forward                       SSH-tunnel the box's dev ports (3000/5173/8000/8002)
-                                       to localhost on this machine (run on your Mac)
+  jt app forward                       SSH-tunnel the box's dev ports
+                                       (3000/5173/8000/8002/8140) to localhost on
+                                       this machine (run on your Mac)
 
 MCP:
   jt mcp run [--lcl|--dev|--prd] [--port N]   Start MCP service (default: --dev, port 8002)
   jt mcp stop [--port N]               Stop MCP service (default: port 8002)
+
+Agent (the "My Companion" in-product AI assistant):
+  jt agent run [--port N]              Start agent-service (default port 8140). Brings up
+                                       its own docker Postgres (host port 5433), seeds
+                                       services/agent-service/.env from .env.example on
+                                       first run, and flags ANTHROPIC_API_KEY if unset.
+  jt agent stop [--port N]             Stop agent-service (leaves the docker DB running)
 
 Pulse (view dev pulse reports in the locally-run UI):
   jt pulse cors [origin]               Allow the local frontend origin (default
@@ -1744,6 +1867,8 @@ Examples:
   jt app forward
   jt mcp run --dev
   jt mcp run --prd --port 9000
+  jt agent run
+  jt agent stop
   jt pulse cors
   jt browser open customer
   jt browser open root http://localhost:5173/admin
@@ -1800,6 +1925,16 @@ dispatch_mcp() {
         run)  cmd_mcp_run "$@" ;;
         stop) cmd_mcp_stop "$@" ;;
         *)    echo "Unknown mcp verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
+    esac
+}
+
+dispatch_agent() {
+    local verb="${1:-}"
+    shift 2>/dev/null || true
+    case "$verb" in
+        run)  cmd_agent_run "$@" ;;
+        stop) cmd_agent_stop "$@" ;;
+        *)    echo "Unknown agent verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
     esac
 }
 
@@ -1874,6 +2009,7 @@ case "$noun" in
     worktree|wt)    dispatch_worktree "$@" ;;
     app)            dispatch_app "$@" ;;
     mcp)            dispatch_mcp "$@" ;;
+    agent)          dispatch_agent "$@" ;;
     pulse)          dispatch_pulse "$@" ;;
     browser)        dispatch_browser "$@" ;;
     sdk)            dispatch_sdk "$@" ;;
