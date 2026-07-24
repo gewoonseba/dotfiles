@@ -1148,11 +1148,18 @@ cmd_pr_review() {
 
 cmd_app_run() {
     parse_env_flag "$@"
-    local env="$ENV_CHOICE"
+    local env="$ENV_CHOICE" run_agent=0 _a
     if [ ${#REMAINING_ARGS[@]} -gt 0 ]; then
-        echo "Unknown argument: ${REMAINING_ARGS[0]}"
-        echo "Usage: jt app run [--lcl|--dev|--prd] [--as <persona>]"
-        exit 1
+        for _a in "${REMAINING_ARGS[@]}"; do
+            case "$_a" in
+                --agent) run_agent=1 ;;
+                *)
+                    echo "Unknown argument: $_a"
+                    echo "Usage: jt app run [--lcl|--dev|--prd] [--as <persona>] [--agent]"
+                    exit 1
+                    ;;
+            esac
+        done
     fi
 
     if [ -z "$env" ]; then
@@ -1200,6 +1207,11 @@ cmd_app_run() {
     echo "Starting services..."
     echo "  Frontend: http://localhost:5173"
     echo "  Backend:  http://localhost:8000"
+    if [ "$run_agent" -eq 1 ]; then
+        echo "  Analytics API: http://localhost:8122  (DB: $env)"
+        echo "  Analytics MCP: http://localhost:8003/mcp"
+        echo "  Agent service: http://localhost:8140"
+    fi
     echo ""
     echo "Viewing from another machine (e.g. your Mac)? Run 'jt app forward' there"
     echo "to tunnel these ports, then open the URLs above."
@@ -1224,6 +1236,59 @@ cmd_app_run() {
     (cd services/frontend 2>/dev/null || cd "$REPO/services/frontend"
      env $vite_env npm run dev) &
 
+    # --agent: also bring up the agent-workflow stack. analytics-api reads the
+    # SAME PG_*/DISABLE_AUTH_RAW/AUTH_*_OVERWRITE this function already exported,
+    # so the env flag (and any --as persona) points it at the SAME dev/prd/local
+    # database as the backend — "the underlying database", not a local one.
+    # analytics-mcp queries that local analytics-api; agent-service (its own
+    # docker Postgres + .env) calls the MCP. All join this process group, so the
+    # trap's 'kill 0' stops them on Ctrl+C too.
+    if [ "$run_agent" -eq 1 ]; then
+        local agent_dir; agent_dir="$(agent_service_dir)"
+        if [ ! -d "$agent_dir" ]; then
+            echo "Warning: $agent_dir not found — skipping the agent stack"
+            echo "(the agent-service may still be on a feature branch)."
+        else
+            agent_ensure_env "$agent_dir"
+            agent_ensure_db "$agent_dir"
+
+            # Track the same bypass switch as the backend/frontend: analytics-api
+            # only bypasses auth when DISABLE_AUTH_RAW is on (a persona, or --prd),
+            # so the MCP + agent-service must match — else analytics-api rejects
+            # the MCP's forwarded token and every data query fails. With --as the
+            # whole chain is bypassed; without it, all use real WorkOS auth.
+            local svc_disable_auth="${DISABLE_AUTH_RAW:-false}"
+
+            # analytics-api loads its OWN .env and has required WorkOS creds (no
+            # defaults), so it crashes on boot without one. Warn early rather than
+            # letting the launch fail cryptically. (analytics-mcp boots on defaults
+            # + the inline vars below; agent-service's .env was seeded above.)
+            local analytics_env
+            analytics_env="$(cd services/analytics-api 2>/dev/null && pwd)/.env" \
+                || analytics_env="$REPO/services/analytics-api/.env"
+            if [ ! -f "$analytics_env" ]; then
+                echo ""
+                echo "⚠  $analytics_env not found — analytics-api needs WorkOS creds to boot."
+                echo "   Create it, mirroring the WORKOS_* values in services/dashboard-api/.env."
+                echo ""
+            fi
+
+            (cd services/analytics-api 2>/dev/null || cd "$REPO/services/analytics-api"
+             uv run uvicorn app.main:app --port 8122) &
+
+            (cd services/analytics-mcp 2>/dev/null || cd "$REPO/services/analytics-mcp"
+             env ANALYTICS_API_BASE_URL="http://localhost:8122" \
+                 DISABLE_AUTH="$svc_disable_auth" \
+                 COMPANION_ENV="local" \
+                 uv run uvicorn app.main:app --port 8003) &
+
+            (cd "$agent_dir"
+             env ANALYTICS_MCP_URL="http://localhost:8003/mcp" \
+                 DISABLE_AUTH="$svc_disable_auth" \
+                 uv run uvicorn app.main:app --port 8140) &
+        fi
+    fi
+
     echo "Services started. Press Ctrl+C to stop."
     echo ""
     wait
@@ -1241,8 +1306,17 @@ cmd_app_stop() {
     # frees and the next 'jt app run' can't bind it (the "works on the 2nd try"
     # bug). Killing the group takes the supervisor down too. Skip our own group so
     # we never kill the in-progress 'jt app run' that called this.
-    for port in 8000 5173; do
-        for pid in $(lsof -ti :"$port" 2>/dev/null); do
+    #
+    # -sTCP:LISTEN is critical: a bare 'lsof -ti :PORT' matches ANY socket on the
+    # port, including CLIENTS connected to it. A browser tab open on
+    # localhost:5173 holds an established connection, so it'd be returned here and
+    # we'd kill -9 its whole process group — nuking the entire browser. Restrict
+    # to listening sockets so we only ever kill the dev servers themselves.
+    # 8000/5173 = backend/frontend; 8122/8003/8140 = the '--agent' stack
+    # (analytics-api / analytics-mcp / agent-service). The agent-service's docker
+    # Postgres (5433) is deliberately left up — stop it with 'docker compose down'.
+    for port in 8000 5173 8122 8003 8140; do
+        for pid in $(lsof -ti :"$port" -sTCP:LISTEN 2>/dev/null); do
             pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')
             [ -n "$pgid" ] && [ "$pgid" != "$cur_pgid" ] && pgids="$pgids $pgid"
         done
@@ -1257,13 +1331,13 @@ cmd_app_stop() {
     for pgid in $pgids; do
         kill -9 -"$pgid" 2>/dev/null || true
     done
-    echo "Stopped services (backend + frontend)"
+    echo "Stopped services (backend + frontend + agent stack)"
 
     # Wait for the kernel to actually release the ports before returning, so the
     # following 'jt app run' binds cleanly.
-    for port in 8000 5173; do
+    for port in 8000 5173 8122 8003 8140; do
         for i in $(seq 1 50); do
-            lsof -ti :"$port" >/dev/null 2>&1 || break
+            lsof -ti :"$port" -sTCP:LISTEN >/dev/null 2>&1 || break
             sleep 0.1
         done
     done
@@ -1547,6 +1621,43 @@ agent_service_dir() {
     (cd services/agent-service 2>/dev/null && pwd) || printf '%s\n' "$REPO/services/agent-service"
 }
 
+# Ensure services/agent-service/.env exists (seed from example) and warn if the
+# Anthropic key is still unset. The service boots either way; only chat calls
+# fail without a key.
+agent_ensure_env() {
+    local agent_dir="$1" env_file="$1/.env"
+    if [ ! -f "$env_file" ]; then
+        if [ -f "$agent_dir/.env.example" ]; then
+            cp "$agent_dir/.env.example" "$env_file"
+            echo "Created $env_file from .env.example."
+        else
+            echo "Warning: no .env or .env.example in $agent_dir."
+        fi
+    fi
+    if ! grep -qE '^ANTHROPIC_API_KEY=.+' "$env_file" 2>/dev/null; then
+        echo ""
+        echo "⚠  ANTHROPIC_API_KEY is not set in $env_file"
+        echo "   Add your key there before using the chat:"
+        echo "     ANTHROPIC_API_KEY=sk-ant-..."
+        echo ""
+    fi
+}
+
+# Bring up the agent-service's OWN docker Postgres (host port 5433). Idempotent;
+# never aborts the caller — warns and continues if docker is absent or fails.
+agent_ensure_db() {
+    local agent_dir="$1"
+    if command -v docker >/dev/null 2>&1; then
+        echo "Starting agent-service database (docker compose)..."
+        docker compose -f "$agent_dir/compose.yaml" up -d --wait 2>/dev/null \
+            || docker compose -f "$agent_dir/compose.yaml" up -d \
+            || echo "Warning: could not start the agent DB (continuing — the service will fail to connect)."
+    else
+        echo "Warning: docker not found — start the agent DB yourself, then re-run:"
+        echo "  docker compose -f $agent_dir/compose.yaml up -d"
+    fi
+}
+
 cmd_agent_run() {
     local port="8140"
     while [ $# -gt 0 ]; do
@@ -1564,38 +1675,10 @@ cmd_agent_run() {
         exit 1
     fi
 
-    # Config: the service reads its own .env from CWD. Seed it from .env.example
-    # on first run, then flag the one secret that must be filled in.
-    local env_file="$agent_dir/.env"
-    if [ ! -f "$env_file" ]; then
-        if [ -f "$agent_dir/.env.example" ]; then
-            cp "$agent_dir/.env.example" "$env_file"
-            echo "Created $env_file from .env.example."
-        else
-            echo "Warning: no .env or .env.example in $agent_dir."
-        fi
-    fi
-    # Warn (don't block): the service starts fine without a key, but chat calls
-    # fail until ANTHROPIC_API_KEY is set to a non-empty value.
-    if ! grep -qE '^ANTHROPIC_API_KEY=.+' "$env_file" 2>/dev/null; then
-        echo ""
-        echo "⚠  ANTHROPIC_API_KEY is not set in $env_file"
-        echo "   Add your key there before using the chat:"
-        echo "     ANTHROPIC_API_KEY=sk-ant-..."
-        echo ""
-    fi
-
-    # The service connects to its own docker Postgres on host port 5433. Bring it
-    # up (idempotent); continue without aborting if docker is missing or fails.
-    if command -v docker >/dev/null 2>&1; then
-        echo "Starting agent-service database (docker compose)..."
-        docker compose -f "$agent_dir/compose.yaml" up -d --wait 2>/dev/null \
-            || docker compose -f "$agent_dir/compose.yaml" up -d \
-            || echo "Warning: could not start the agent DB (continuing — the service will fail to connect)."
-    else
-        echo "Warning: docker not found — start the agent DB yourself, then re-run:"
-        echo "  docker compose -f $agent_dir/compose.yaml up -d"
-    fi
+    # Config: the service reads its own .env from CWD (seeded here on first run),
+    # and needs its own docker Postgres up to connect to.
+    agent_ensure_env "$agent_dir"
+    agent_ensure_db "$agent_dir"
 
     # Free the port so a re-run just works (mirrors 'jt mcp run').
     local pids
@@ -1800,12 +1883,19 @@ PR (review an existing pull request):
                                        argument.
 
 App (backend + frontend):
-  jt app run [--lcl|--dev|--prd] [--as <persona>]
+  jt app run [--lcl|--dev|--prd] [--as <persona>] [--agent]
                                        Start backend + frontend (default: lcl).
                                        --as <persona> bypasses login as that persona
                                        (root/partner/customer/…, defined in
                                        ~/.config/jt/environments.sh) against the env's DB.
-  jt app stop                          Stop backend + frontend
+                                       --agent also starts the agent-workflow stack:
+                                       analytics-api (:8122) on the SAME --lcl/--dev/--prd
+                                       database, analytics-mcp (:8003), and agent-service
+                                       (:8140). Pair with --as so the MCP's data source
+                                       is auth-bypassed against that DB, e.g.
+                                       'jt app run --dev --as root --agent'.
+  jt app stop                          Stop backend + frontend (+ the --agent stack;
+                                       the agent docker DB is left running)
   jt app forward                       SSH-tunnel the box's dev ports
                                        (3000/5173/8000/8002/8140) to localhost on
                                        this machine (run on your Mac)
@@ -1864,6 +1954,7 @@ Examples:
   jt wt open feat/battery-charts
   jt app run --prd
   jt app run --dev --as partner
+  jt app run --dev --as root --agent
   jt app forward
   jt mcp run --dev
   jt mcp run --prd --port 9000
