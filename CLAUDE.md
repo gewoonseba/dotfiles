@@ -6,6 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a **dotfiles repository** that uses **GNU Stow** to manage configuration files across Linux and macOS machines. Stow creates symlinks from this repository to `$HOME`, allowing version-controlled config files while maintaining their expected locations in the filesystem.
 
+### Machines and Remote Access
+
+These dotfiles are shared across Sebastian's Linux desktop and MacBook. Changes may
+affect either or both machines, so account for platform-specific behavior before
+changing shared configuration.
+
+For the machine hostnames, SSH aliases, and machine-specific SSH and Git credential
+rules, read the `machine-ssh` skill at
+`agents/.agents/skills/machine-ssh/SKILL.md` before accessing either machine or
+editing SSH or Git configuration.
+
 ## Core Architecture
 
 ### Stow-Based Structure

@@ -42,6 +42,74 @@ wt_dir() {
     printf '%s/%s' "$WORKTREES" "${1//\//-}"
 }
 
+# Switch to the node version the repo pins in .nvmrc, installing it via nvm if
+# missing. The pin is not cosmetic: node 26 ships npm 12, which refuses
+# remote-tarball dependencies by default, and services/frontend installs 'xlsx'
+# from the SheetJS CDN — so 'npm i' dies with EALLOWREMOTE when a newer system
+# node (e.g. a distro package) shadows the pin. Doing it here keeps every
+# npm/node call below (install, vite dev, sdk build) on the same version as
+# .nvmrc and CI, in the non-interactive shells where the zshrc setup never runs.
+use_pinned_node() {
+    local dir="${1:-$REPO}" version nvm_sh
+    [ -f "$dir/.nvmrc" ] || dir="$REPO"
+    [ -f "$dir/.nvmrc" ] || return 0
+    # Pure-bash trim: avoids the BSD/GNU 'tr' escape differences that a
+    # 'tr -d' pipeline would hit between macOS and Linux. Handles a bare
+    # "24.13" and a "v24.13" alike.
+    # '|| true': read reports failure on a final line with no trailing newline,
+    # having still assigned it — the emptiness check below is the real guard.
+    read -r version < "$dir/.nvmrc" || true
+    version="${version//[[:space:]]/}"; version="${version#v}"
+    [ -n "$version" ] || return 0
+
+    # Two distinct things, deliberately tracked apart: where nvm keeps installed
+    # versions (NVM_DIR) and where nvm.sh itself lives. 'brew install nvm' puts
+    # nvm.sh under the Homebrew prefix while versions still belong in NVM_DIR, so
+    # collapsing the two would have nvm install node into the Cellar.
+    local data_dir="${NVM_DIR:-}"
+    if [ -z "$data_dir" ]; then
+        # Match the zshrc's XDG location, falling back to nvm's own default.
+        data_dir="${XDG_DATA_HOME:-$HOME/.local/share}/nvm"
+        [ -d "$data_dir" ] || [ ! -d "$HOME/.nvm" ] || data_dir="$HOME/.nvm"
+    fi
+
+    nvm_sh=""
+    local c
+    for c in "$data_dir" "${XDG_DATA_HOME:-$HOME/.local/share}/nvm" "$HOME/.nvm" \
+             /opt/homebrew/opt/nvm /usr/local/opt/nvm; do
+        [ -s "$c/nvm.sh" ] && { nvm_sh="$c/nvm.sh"; break; }
+    done
+    if [ -z "$nvm_sh" ]; then
+        echo "Warning: nvm not found — using node $(node -v 2>/dev/null || echo '?')," >&2
+        echo "but this repo pins node $version. Expect 'npm i' to fail if they differ." >&2
+        return 0
+    fi
+    export NVM_DIR="$data_dir"
+    [ -d "$NVM_DIR" ] || mkdir -p "$NVM_DIR"
+
+    # nvm.sh reads unset variables and returns non-zero on benign paths, so it
+    # is not safe under this script's 'set -euo pipefail'. Relax around it only.
+    # --no-use keeps sourcing cheap: we pick the version explicitly next.
+    set +eu
+    # shellcheck disable=SC1090
+    . "$nvm_sh" --no-use >/dev/null 2>&1
+    nvm use "$version" >/dev/null 2>&1 || {
+        echo "Installing node $version (pinned in .nvmrc)..."
+        nvm install "$version" >/dev/null 2>&1
+        nvm use "$version" >/dev/null 2>&1
+    }
+    set -eu
+
+    # 'nvm use' mutates PATH in this shell; confirm it took rather than trusting
+    # it, so a failed install surfaces here instead of as a confusing npm error.
+    local active
+    active="$(node -v 2>/dev/null || true)"
+    case "$active" in
+        "v$version"|"v$version".*) ;;
+        *) echo "Warning: wanted node $version (.nvmrc) but node is ${active:-absent}." >&2 ;;
+    esac
+}
+
 # Echo a usable current directory, or fail with guidance. A shell whose cwd was
 # moved or removed out from under it (e.g. after a worktree was relocated or
 # removed) keeps a stale $PWD that no longer exists, which otherwise turns into
@@ -140,7 +208,11 @@ setup_worktree_deps() {
     (cd "$target_dir" && uv sync --quiet)
 
     echo "Installing frontend dependencies..."
-    (cd "$target_dir/services/frontend" && npm i --silent 2>/dev/null)
+    # Not silenced: npm's failures here (version pin, registry auth, lockfile
+    # drift) are the ones worth reading in .jt-setup.log, and discarding stderr
+    # turned a clear EALLOWREMOTE into an unexplained non-zero exit.
+    use_pinned_node "$target_dir"
+    (cd "$target_dir/services/frontend" && npm i --no-fund --no-audit)
 
     echo "Installing pre-commit hooks..."
     (cd "$target_dir" && uv run pre-commit install)
@@ -1234,6 +1306,7 @@ cmd_app_run() {
         vite_env="VITE_DISABLE_AUTH=true VITE_COMPANION_ENV=local"
     fi
     (cd services/frontend 2>/dev/null || cd "$REPO/services/frontend"
+     use_pinned_node "$PWD/../.."
      env $vite_env npm run dev) &
 
     # --agent: also bring up the agent-workflow stack. analytics-api reads the
@@ -1343,28 +1416,50 @@ cmd_app_stop() {
     done
 }
 
-# Open an SSH tunnel that forwards the app's dev ports from the remote box to
-# this machine, so servers started with 'jt app run' over there are reachable
-# at localhost here. Run this on your local machine (e.g. your Mac). Relies on a
-# 'Host wsl' entry in ~/.ssh/config for the connection (host, port, user, key).
+# Open an SSH tunnel to the other machine over Tailscale, so services started
+# with 'jt app run' there remain reachable at localhost here. Keeping localhost
+# is important: the frontend's local config and WorkOS redirect URI both use it.
+# Defaults to the 'desktop' SSH alias; pass --host macbook for the reverse route.
 cmd_app_forward() {
-    local host="devbox"
+    local host="desktop"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --host)
+                [ $# -ge 2 ] && [ -n "$2" ] \
+                    || { echo "Error: --host needs an SSH host or alias."; return 1; }
+                host="$2"
+                shift 2
+                ;;
+            -h|--help)
+                echo "Usage: jt app forward [--host <ssh-host>]"
+                echo ""
+                echo "Defaults to 'desktop'. Use '--host macbook' for the reverse route."
+                return 0
+                ;;
+            *)
+                echo "Unknown argument: $1"
+                echo "Usage: jt app forward [--host <ssh-host>]"
+                return 1
+                ;;
+        esac
+    done
+
     # 8140 = agent-service ("My Companion" AI assistant). Its own docker Postgres
     # (5433) and the analytics MCP (8003) it calls are server-side only, so only
     # the HTTP port the browser hits needs tunnelling.
-    local -a ports=(3000 5173 8000 8002 8140)
+    local -a ports=(5173 8000 8140)
 
-    # SSH can't bind a local port that's already taken; warn before connecting.
+    # SSH can't bind a local port that's already taken. Check listening sockets
+    # only: an open browser connection is not itself a conflict.
     local -a busy=()
     local p
     for p in "${ports[@]}"; do
-        lsof -ti :"$p" >/dev/null 2>&1 && busy+=("$p")
+        lsof -ti :"$p" -sTCP:LISTEN >/dev/null 2>&1 && busy+=("$p")
     done
     if [ ${#busy[@]} -gt 0 ]; then
-        echo "Local ports already in use: ${busy[*]}"
-        echo "If the app is running locally, stop it first ('jt app stop') so the"
-        echo "box can serve it instead — otherwise those forwards will fail to bind."
-        echo ""
+        echo "Error: local ports already in use: ${busy[*]}"
+        echo "Stop the local services using them, then run 'jt app forward' again."
+        return 1
     fi
 
     local -a fwd=()
@@ -1372,10 +1467,16 @@ cmd_app_forward() {
         fwd+=(-L "$p:localhost:$p")
     done
 
-    echo "Forwarding ${ports[*]} from '$host' -> localhost. Leave running (Ctrl+C to stop)."
+    echo "Forwarding ports ${ports[*]} from '$host' to localhost."
     echo "Then open http://localhost:5173"
+    echo "Leave this running; press Ctrl+C to stop."
     echo ""
-    exec ssh -N "${fwd[@]}" "$host"
+    exec ssh -N \
+        -o BatchMode=yes \
+        -o ExitOnForwardFailure=yes \
+        -o ServerAliveInterval=15 \
+        -o ServerAliveCountMax=3 \
+        "${fwd[@]}" "$host"
 }
 
 # Serve a directory (default: the worktree's root .context folder — plans, docs,
@@ -1831,7 +1932,7 @@ cmd_sdk_generate() {
     rm -f "$fd3"
 
     echo "Generating SDK..."
-    (cd "$sdk_dir" && npm run build)
+    (cd "$sdk_dir" && use_pinned_node "$sdk_dir/../.." && npm run build)
     echo "Done."
 }
 
@@ -1896,9 +1997,9 @@ App (backend + frontend):
                                        'jt app run --dev --as root --agent'.
   jt app stop                          Stop backend + frontend (+ the --agent stack;
                                        the agent docker DB is left running)
-  jt app forward                       SSH-tunnel the box's dev ports
-                                       (3000/5173/8000/8002/8140) to localhost on
-                                       this machine (run on your Mac)
+  jt app forward [--host <ssh-host>]   Tunnel app ports from another machine
+                                       (default host: desktop)
+                                       (5173/8000/8140) to localhost on this machine
 
 MCP:
   jt mcp run [--lcl|--dev|--prd] [--port N]   Start MCP service (default: --dev, port 8002)
@@ -2004,7 +2105,7 @@ dispatch_app() {
     case "$verb" in
         run)                cmd_app_run "$@" ;;
         stop)               cmd_app_stop ;;
-        forward|fwd|tunnel) cmd_app_forward ;;
+        forward|fwd|tunnel) cmd_app_forward "$@" ;;
         *)    echo "Unknown app verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
     esac
 }
