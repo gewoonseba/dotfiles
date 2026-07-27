@@ -1457,9 +1457,38 @@ cmd_app_forward() {
         lsof -ti :"$p" -sTCP:LISTEN >/dev/null 2>&1 && busy+=("$p")
     done
     if [ ${#busy[@]} -gt 0 ]; then
-        echo "Error: local ports already in use: ${busy[*]}"
-        echo "Stop the local services using them, then run 'jt app forward' again."
-        return 1
+        echo "Local app ports already in use: ${busy[*]}"
+        local confirm
+        while true; do
+            if ! read -rp "Stop the local app processes? [Y/n] " confirm; then
+                echo ""
+                echo "Unable to read confirmation; leaving local processes running."
+                return 1
+            fi
+            case "${confirm:-y}" in
+                y|Y|yes|YES|Yes)
+                    cmd_app_stop
+                    break
+                    ;;
+                n|N|no|NO|No)
+                    echo "Leaving local processes running; forwarding cancelled."
+                    return 1
+                    ;;
+                *) echo "Please answer yes or no." ;;
+            esac
+        done
+
+        # cmd_app_stop waits for the known app services to release their ports.
+        # Check again in case a different process owns one or immediately
+        # restarted; SSH would otherwise fail with a less useful bind error.
+        busy=()
+        for p in "${ports[@]}"; do
+            lsof -ti :"$p" -sTCP:LISTEN >/dev/null 2>&1 && busy+=("$p")
+        done
+        if [ ${#busy[@]} -gt 0 ]; then
+            echo "Error: local ports still in use after stopping services: ${busy[*]}"
+            return 1
+        fi
     fi
 
     local -a fwd=()
