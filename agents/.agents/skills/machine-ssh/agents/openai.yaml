@@ -1,0 +1,4 @@
+interface:
+  display_name: "Machine SSH"
+  short_description: "Connect the MacBook and desktop over SSH"
+  default_prompt: "Use $machine-ssh to connect to my other machine over SSH."
