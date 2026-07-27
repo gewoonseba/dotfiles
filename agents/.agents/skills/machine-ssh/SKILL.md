@@ -1,6 +1,6 @@
 ---
 name: machine-ssh
-description: Connect between Sebastian's MacBook and Linux desktop over SSH. Use when work must run on the other machine or when checking their SSH or 1Password agent-forwarding setup.
+description: Connect between Sebastian's MacBook and Linux desktop over SSH. Use when work must run on the other machine or when checking their SSH or dedicated desktop GitHub credentials.
 ---
 
 # Machine SSH
@@ -10,4 +10,4 @@ Identify the current machine with `hostname`, then connect:
 - MacBook (`Sebastians-MacBook-Pro.local`) → `ssh desktop`
 - Desktop (`sebastians-desktop`) → `ssh macbook`
 
-The MacBook forwards its 1Password SSH agent to the desktop, so GitHub approvals appear on the MacBook. Direct desktop use falls back to the desktop's local 1Password agent. Preserve these aliases and agent behaviors when editing SSH configuration.
+Do not forward the MacBook's SSH agent. The desktop authenticates to GitHub with `~/.ssh/id_ed25519_github_desktop_auth` and signs commits with `~/.ssh/id_ed25519_github_desktop_signing`; both work in persistent Herdr sessions. Preserve these aliases and dedicated-key behavior when editing SSH or Git configuration.
