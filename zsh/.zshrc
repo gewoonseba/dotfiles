@@ -1,6 +1,9 @@
 # Source secrets (not tracked in git)
 [ -f ~/.secrets ] && source ~/.secrets
 
+# Load Omarchy's environment when available (silently skipped on macOS).
+[[ -r "$HOME/.local/share/omarchy/default/bash/envs" ]] &&
+  source "$HOME/.local/share/omarchy/default/bash/envs"
 
 export PNPM_HOME="$HOME/.local/share/pnpm"
 export PATH=$PATH:$HOME/.local/bin:$PNPM_HOME
