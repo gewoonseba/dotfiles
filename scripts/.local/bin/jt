@@ -1618,23 +1618,45 @@ cmd_pulse_cors() {
 # ─── MCP commands ──────────────────────────────────────────
 
 cmd_mcp_run() {
-    local env="" port="8002"
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --lcl)  env="lcl"; shift ;;
-            --dev)  env="dev"; shift ;;
-            --prd)  env="prd"; shift ;;
-            --port) port="${2:-}"; [ -z "$port" ] && { echo "--port needs a value"; exit 1; }; shift 2 ;;
-            *)      echo "Unknown argument: $1"; echo "Usage: jt mcp run [--lcl|--dev|--prd] [--port N]"; exit 1 ;;
-        esac
-    done
+    # --as is accepted (via parse_env_flag) because the analytics chain needs a
+    # persona: analytics-api only bypasses auth when DISABLE_AUTH_RAW is on, and
+    # without the bypass it rejects the MCP's forwarded dev token.
+    parse_env_flag "$@"
+    local env="$ENV_CHOICE" target="management" port="" _a
+    if [ ${#REMAINING_ARGS[@]} -gt 0 ]; then
+        local i=0
+        while [ $i -lt ${#REMAINING_ARGS[@]} ]; do
+            _a="${REMAINING_ARGS[$i]}"
+            case "$_a" in
+                --analytics)  target="analytics"; i=$((i + 1)) ;;
+                --management) target="management"; i=$((i + 1)) ;;
+                --port)
+                    port="${REMAINING_ARGS[$((i + 1))]:-}"
+                    [ -z "$port" ] && { echo "--port needs a value"; exit 1; }
+                    i=$((i + 2))
+                    ;;
+                *)
+                    echo "Unknown argument: $_a"
+                    echo "Usage: jt mcp run [--analytics] [--lcl|--dev|--prd] [--as <persona>] [--port N]"
+                    exit 1
+                    ;;
+            esac
+        done
+    fi
 
     if [ -z "$env" ]; then
         env="$(prompt_env dev)"
     fi
 
+    if [ "$target" = "analytics" ]; then
+        mcp_run_analytics "$env" "${port:-8003}"
+        return
+    fi
+
+    [ -z "$port" ] && port="8002"
+
     local mcp_dir
-    mcp_dir="$(cd services/mcp-service 2>/dev/null && pwd)" || mcp_dir="$REPO/services/mcp-service"
+    mcp_dir="$(cd services/management-mcp 2>/dev/null && pwd)" || mcp_dir="$REPO/services/management-mcp"
     local spec_file="$mcp_dir/app/openapi_spec.json"
 
     # Generate OpenAPI spec if missing
@@ -1658,7 +1680,7 @@ cmd_mcp_run() {
             FLUVIUS_CLIENT_SECRET="${FLUVIUS_CLIENT_SECRET:-x}" \
             FLUVIUS_SUBSCRIPTION_KEY="${FLUVIUS_SUBSCRIPTION_KEY:-x}" \
             DAGSTER_URL="${DAGSTER_URL:-http://x}" \
-            PYTHONPATH=. uv run python ../mcp-service/scripts/generate_openapi_spec.py)
+            PYTHONPATH=. uv run python ../management-mcp/scripts/generate_openapi_spec.py)
     fi
 
     # Stop any existing MCP server on this port
@@ -1717,23 +1739,127 @@ cmd_mcp_run() {
     wait
 }
 
+# Run the analytics MCP (:8003) plus the analytics-api (:8122) it queries, against
+# the chosen environment's database. This is the '--agent' stack of 'jt app run'
+# minus the frontend, backend and agent-service — for when you only need to
+# exercise the MCP itself. analytics-api reads the PG_*/AUTH_*_OVERWRITE exported
+# here, so --dev/--prd point it at THAT database, not a local one.
+mcp_run_analytics() {
+    local env="$1" port="$2"
+
+    local env_file="$HOME/.config/jt/environments.sh"
+    if [ ! -f "$env_file" ]; then
+        echo "Error: missing $env_file"
+        echo ""
+        echo "Create it with env_lcl(), env_dev(), env_prd() shell functions."
+        exit 1
+    fi
+    # shellcheck source=/dev/null
+    source "$env_file"
+    case "$env" in
+        lcl) env_lcl ;;
+        dev) env_dev ;;
+        prd) env_prd ;;
+    esac
+
+    if [ -n "${PERSONA:-}" ]; then
+        resolve_persona "$env" "$PERSONA" || {
+            echo "Aborting: persona '$PERSONA' is not defined for env '$env' in $env_file."
+            exit 1
+        }
+    fi
+
+    # analytics-api only bypasses auth when DISABLE_AUTH_RAW is on (a persona, or
+    # env_prd). The MCP must match: otherwise analytics-api rejects the token the
+    # MCP forwards and every data query fails.
+    local disable_auth="${DISABLE_AUTH_RAW:-false}"
+    if [ "$disable_auth" = "true" ]; then
+        export COMPANION_ENV=local
+    fi
+
+    local analytics_api_dir mcp_dir
+    analytics_api_dir="$(cd services/analytics-api 2>/dev/null && pwd)" \
+        || analytics_api_dir="$REPO/services/analytics-api"
+    mcp_dir="$(cd services/analytics-mcp 2>/dev/null && pwd)" || mcp_dir="$REPO/services/analytics-mcp"
+
+    # analytics-api loads its OWN .env and has required WorkOS creds with no
+    # defaults, so it crashes on boot without one. Warn early rather than letting
+    # the launch fail cryptically.
+    if [ ! -f "$analytics_api_dir/.env" ]; then
+        echo ""
+        echo "⚠  $analytics_api_dir/.env not found — analytics-api needs WorkOS creds to boot."
+        echo "   Create it, mirroring the WORKOS_* values in services/dashboard-api/.env."
+        echo ""
+    fi
+
+    # Free both ports so a re-run just works. -sTCP:LISTEN so we never match (and
+    # kill) a client connected to the port — see the note in cmd_app_stop.
+    local p pids
+    for p in "$port" 8122; do
+        pids=$(lsof -ti :"$p" -sTCP:LISTEN 2>/dev/null || true)
+        if [ -n "$pids" ]; then
+            echo "$pids" | xargs kill -9 2>/dev/null || true
+        fi
+    done
+    sleep 1
+
+    echo ""
+    echo "Starting analytics MCP stack..."
+    echo "  Environment:    $env  (DB: $env)"
+    echo "  Persona:        ${PERSONA:-none}"
+    echo "  Auth:           $([ "$disable_auth" = "true" ] && echo "bypassed (whole chain)" || echo "OAuth (WorkOS)")"
+    echo "  Analytics API:  http://localhost:8122"
+    echo "  MCP endpoint:   http://localhost:$port/mcp/"
+    echo ""
+
+    trap 'echo ""; echo "Stopping analytics MCP stack..."; kill 0' INT TERM
+
+    (cd "$analytics_api_dir" && uv run uvicorn app.main:app --port 8122) &
+
+    # cd into the dir so analytics-mcp's pydantic-settings picks up its own .env
+    # (e.g. POSTHOG_PROJECT_TOKEN); the inline vars below win over that file.
+    (cd "$mcp_dir" && \
+        env ANALYTICS_API_BASE_URL="http://localhost:8122" \
+            DISABLE_AUTH="$disable_auth" \
+            MCP_BASE_URL="http://localhost:$port" \
+            COMPANION_ENV="local" \
+            LOG_LEVEL="INFO" \
+            uv run uvicorn app.main:app --port "$port") &
+
+    wait
+}
+
 cmd_mcp_stop() {
-    local port="8002"
+    local port="" target="management"
     while [ $# -gt 0 ]; do
         case "$1" in
+            --analytics)  target="analytics"; shift ;;
+            --management) target="management"; shift ;;
             --port) port="${2:-}"; [ -z "$port" ] && { echo "--port needs a value"; exit 1; }; shift 2 ;;
-            *)      echo "Unknown argument: $1"; echo "Usage: jt mcp stop [--port N]"; exit 1 ;;
+            *)      echo "Unknown argument: $1"; echo "Usage: jt mcp stop [--analytics] [--port N]"; exit 1 ;;
         esac
     done
 
-    local pids
-    pids=$(lsof -ti :"$port" 2>/dev/null || true)
-    if [ -n "$pids" ]; then
-        echo "$pids" | xargs kill -9 2>/dev/null || true
-        echo "Stopped MCP service (port $port)"
+    # The analytics MCP fronts an analytics-api on 8122; stop both, else the next
+    # run can't bind it. -sTCP:LISTEN so a connected client is never matched.
+    local ports
+    if [ "$target" = "analytics" ]; then
+        ports="${port:-8003} 8122"
     else
-        echo "No MCP service running on port $port."
+        ports="${port:-8002}"
     fi
+
+    local p pids stopped=0
+    for p in $ports; do
+        pids=$(lsof -ti :"$p" -sTCP:LISTEN 2>/dev/null || true)
+        if [ -n "$pids" ]; then
+            echo "$pids" | xargs kill -9 2>/dev/null || true
+            echo "Stopped MCP service (port $p)"
+            stopped=1
+        fi
+    done
+    [ "$stopped" -eq 0 ] && echo "No MCP service running on port(s):$(printf ' %s' $ports)"
+    return 0
 }
 
 # ─── Agent-service commands ────────────────────────────────
@@ -2031,8 +2157,16 @@ App (backend + frontend):
                                        (5173/8000/8140) to localhost on this machine
 
 MCP:
-  jt mcp run [--lcl|--dev|--prd] [--port N]   Start MCP service (default: --dev, port 8002)
-  jt mcp stop [--port N]               Stop MCP service (default: port 8002)
+  jt mcp run [--lcl|--dev|--prd] [--port N]   Start the management MCP
+                                       (default: --dev, port 8002)
+  jt mcp run --analytics [--lcl|--dev|--prd] [--as <persona>] [--port N]
+                                       Start the analytics MCP (:8003) plus the
+                                       analytics-api (:8122) it queries, against
+                                       the env's database. Pair with --as so the
+                                       whole chain is auth-bypassed, e.g.
+                                       'jt mcp run --analytics --dev --as root'.
+  jt mcp stop [--analytics] [--port N] Stop MCP service (management: 8002;
+                                       --analytics: 8003 + 8122)
 
 Agent (the "My Companion" in-product AI assistant):
   jt agent run [--port N]              Start agent-service (default port 8140). Brings up
