@@ -42,6 +42,29 @@ wt_dir() {
     printf '%s/%s' "$WORKTREES" "${1//\//-}"
 }
 
+# When create/checkout finds an existing worktree, offer to enter it instead.
+# Keep non-interactive callers fail-fast rather than silently changing cwd.
+open_existing_worktree_or_exit() {
+    local branch="$1"
+    local worktree_dir="$2"
+    local answer
+
+    echo "Worktree already exists at: $worktree_dir"
+    if [ ! -t 0 ]; then
+        echo "Use 'jt worktree open $branch' to cd into it, or 'jt worktree edit $branch' to open in Zed."
+        exit 1
+    fi
+
+    while true; do
+        read -rp "Open the existing worktree? [Y/n] " answer || exit 1
+        case "${answer,,}" in
+            ""|y|yes) cmd_worktree_open "$branch" ;;
+            n|no)     echo "Not opening the existing worktree."; exit 0 ;;
+            *)        echo "Please answer yes or no." ;;
+        esac
+    done
+}
+
 # Switch to the node version the repo pins in .nvmrc, installing it via nvm if
 # missing. The pin is not cosmetic: node 26 ships npm 12, which refuses
 # remote-tarball dependencies by default, and services/frontend installs 'xlsx'
@@ -369,9 +392,7 @@ cmd_worktree_create() {
     local worktree_dir; worktree_dir="$(wt_dir "$branch")"
 
     if [ -d "$worktree_dir" ]; then
-        echo "Error: directory already exists: $worktree_dir"
-        echo "Use 'jt worktree open $branch' to cd into it, or 'jt worktree edit $branch' to open in Zed."
-        exit 1
+        open_existing_worktree_or_exit "$branch" "$worktree_dir"
     fi
 
     echo "Creating worktree: $branch"
@@ -401,9 +422,7 @@ cmd_worktree_checkout() {
     local worktree_dir; worktree_dir="$(wt_dir "$branch")"
 
     if [ -d "$worktree_dir" ]; then
-        echo "Error: directory already exists: $worktree_dir"
-        echo "Use 'jt worktree open $branch' to cd into it, or 'jt worktree edit $branch' to open in Zed."
-        exit 1
+        open_existing_worktree_or_exit "$branch" "$worktree_dir"
     fi
 
     echo "Fetching remote branch: $branch"
