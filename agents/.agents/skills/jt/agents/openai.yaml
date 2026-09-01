@@ -1,0 +1,4 @@
+interface:
+  display_name: "JT"
+  short_description: "Manage Jolteon worktrees and local services"
+  default_prompt: "Use $jt to create or select a Jolteon worktree and run the needed services safely."

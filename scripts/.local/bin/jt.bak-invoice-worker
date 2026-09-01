@@ -14,20 +14,11 @@ set -euo pipefail
 # jt — Jolteon worktree & service manager
 # See: jt help
 
-# Base work dir — tolerate Work/work casing across machines, preferring "Work".
-#
-# The order matters and used to be the other way round. On a case-INSENSITIVE
-# filesystem (macOS) either spelling resolves the same directory, so the preference is
-# invisible there. On a case-SENSITIVE one both can exist as separate directories, each
-# a full clone with its own worktrees and its own .env files — and then whichever this
-# picks is silently the only repo jt can see. That is not hypothetical: this box has
-# both, and preferring lowercase meant `jt setup` copied env files from the checkout
-# that was NOT being maintained, handing every new worktree a stale .env (a missing
-# CUSTOMER_DATA_STORAGE_CONNECTION_STRING, so invoice intake 500s).
-#
-# "Work" is canonical: it holds the current .env files. If you ever migrate to the
-# lowercase one, move the env files with it rather than flipping this back.
-WORK="$HOME/Work"; [ -d "$WORK" ] || WORK="$HOME/work"
+# Base work dir — tolerate Work/work casing across machines. macOS's filesystem
+# is case-insensitive (so lowercase resolves a "Work" dir), and WSL/Linux here
+# uses lowercase "work". Prefer lowercase; fall back to capital for any
+# case-sensitive box that uses "Work".
+WORK="$HOME/work"; [ -d "$WORK" ] || WORK="$HOME/Work"
 REPO="$WORK/jolteon"
 # All worktrees live flat under ~/work/worktrees/<repo>/<worktree-name>, with a
 # slash-free worktree name (a branch's '/' becomes '-' — see wt_dir). Keeping
@@ -350,16 +341,10 @@ post_create_worktree() {
     exit 0
 }
 
-# Parse --dev/--fork/--prd-fork/--prd flags into $ENV_CHOICE. Unknown args go to
-# $REMAINING_ARGS.
+# Parse --dev/--fork/--prd flags into $ENV_CHOICE. Unknown args go to $REMAINING_ARGS.
 #
-# Four environments, no local:
-#   dev       the day-to-day writable one
-#   fork      a Tiger fork of DEV — take one when your change involves a migration
-#   prd-fork  a Tiger fork of PRD — real customer data, writable, auto-deleted. The only
-#             way to exercise something that WRITES against real data: --prd connects as
-#             developer_readonly, so a worker that moves invoice status cannot run there.
-#   prd       read-only
+# Three environments, no local: dev is the day-to-day writable one, fork is a Tiger fork
+# of it (take one when your change involves a migration), prd is read-only.
 parse_env_flag() {
     ENV_CHOICE=""
     PERSONA=""
@@ -368,10 +353,6 @@ parse_env_flag() {
         case "$1" in
             --dev)  ENV_CHOICE="dev"; shift ;;
             --fork) ENV_CHOICE="fork"; shift ;;
-            # Underscored, not hyphenated: the value is interpolated into function names
-            # (env_$env, agent_env_$env) and the persona case, and a hyphen is not valid
-            # in a shell identifier.
-            --prd-fork|--prdfork) ENV_CHOICE="prd_fork"; shift ;;
             --prd)  ENV_CHOICE="prd"; shift ;;
             --lcl)
                 echo "--lcl is gone: this setup runs against dev, a Tiger fork (--fork), or read-only prd." >&2
@@ -391,116 +372,25 @@ parse_env_flag() {
     done
 }
 
-# ─── Tiger forks ───────────────────────────────────────────
-#
-# `--prd-fork` resolves its connection details from the Tiger CLI at launch instead of
-# from environments.sh, and that is the whole design rather than a convenience.
-#
-# A fork's endpoint does not follow the convention the other environments use: it is the
-# PUBLIC host (`*.db.*`, not `*.privatelink.*`) on a port Tiger assigns per service, so
-# BOTH change every time you take one. Typing them is how you get a password-auth failure
-# against the right host and spend twenty minutes on the wrong suspect.
-#
-# So the only thing written down is the pair of service ids (see the file below). Host,
-# port, role and password come from `tiger db connection-string --with-password`, which
-# reads the password out of the CLI's own store — `~/.pgpass`, put there once with
-# `tiger db save-password <id> --password-storage pgpass`. Nothing secret goes in a file
-# anybody edits, and nothing is copied by hand.
-JT_FORK_CONFIG="$HOME/.config/jt/forks/prd"
-
-# Tiger API credentials, from Key Vault — the same two secrets the fork workflow reads.
-# Fetched rather than kept on disk, and only when a fork env is actually selected.
-fork_tiger_auth() {
-    [ -n "${TIGER_PUBLIC_KEY:-}" ] && [ -n "${TIGER_SECRET_KEY:-}" ] && return 0
-    command -v az >/dev/null 2>&1 || { echo "Error: az CLI not found; cannot read Tiger credentials." >&2; return 1; }
-    TIGER_PUBLIC_KEY="$(az keyvault secret show --vault-name kv-companionenergy-weu --name TigerPublicKey --query value -o tsv 2>/dev/null)"
-    TIGER_SECRET_KEY="$(az keyvault secret show --vault-name kv-companionenergy-weu --name TigerSecretKey --query value -o tsv 2>/dev/null)"
-    export TIGER_PUBLIC_KEY TIGER_SECRET_KEY
-    if [ -z "$TIGER_PUBLIC_KEY" ] || [ -z "$TIGER_SECRET_KEY" ]; then
-        echo "Error: could not read Tiger credentials from Key Vault. Is 'az login' current?" >&2
-        return 1
-    fi
-    return 0
-}
-
-# Export <prefix>HOST/PORT/USER/PASSWORD/DATABASE/SSLMODE for one Tiger service.
-# `prefix` is "PG_" for Jolteon or "AGENT_PG_" for agent-service — the two naming schemes
-# jt already passes to the services.
-fork_export_service() {
-    local id="$1" prefix="$2" cs
-    fork_tiger_auth || return 1
-    cs="$(TIGER_VERSION_CHECK_INTERVAL=0 TIGER_OUTPUT=text \
-            tiger db connection-string "$id" --with-password --password-storage pgpass 2>/dev/null)"
-    if [ -z "$cs" ]; then
-        echo "Error: no connection string for Tiger service '$id'." >&2
-        echo "       Is the fork still alive ('tiger service list'), and has its password" >&2
-        echo "       been stored ('tiger db save-password $id --password-storage pgpass')?" >&2
-        return 1
-    fi
-    # postgresql://USER:PASSWORD@HOST:PORT/DB?... — parsed with bash rather than a URL
-    # library because the password must not become an argv entry anywhere.
-    local rest userinfo hostport
-    rest="${cs#*://}"; rest="${rest%%\?*}"
-    userinfo="${rest%%@*}"; hostport="${rest#*@}"
-    local user pass host port db
-    user="${userinfo%%:*}"; pass="${userinfo#*:}"
-    db="${hostport#*/}"; hostport="${hostport%%/*}"
-    host="${hostport%:*}"; port="${hostport##*:}"
-    if [ -z "$pass" ] || [ "$pass" = "$userinfo" ]; then
-        echo "Error: connection string for '$id' carries no password." >&2
-        echo "       Store it once: tiger db save-password $id --password-storage pgpass" >&2
-        return 1
-    fi
-    export "${prefix}HOST=$host" "${prefix}PORT=$port" "${prefix}USER=$user" \
-           "${prefix}PASSWORD=$pass" "${prefix}DATABASE=$db" "${prefix}SSLMODE=require"
-    return 0
-}
-
-# Resolve both halves of the prd fork pair. Fails loudly rather than starting half a stack:
-# the Jolteon fork alone gives an assistant that refuses every conversation, which is the
-# confusing failure this pairing exists to prevent.
-fork_env_prd() {
-    if [ ! -f "$JT_FORK_CONFIG" ]; then
-        echo "Error: no fork config at $JT_FORK_CONFIG." >&2
-        echo "       Take a pair of forks and record their ids there — see 'jt help' → Forks." >&2
-        return 1
-    fi
-    # shellcheck source=/dev/null
-    source "$JT_FORK_CONFIG"
-    if [ -z "${JOLTEON_FORK_ID:-}" ] || [ -z "${AGENT_FORK_ID:-}" ]; then
-        echo "Error: $JT_FORK_CONFIG must set both JOLTEON_FORK_ID and AGENT_FORK_ID." >&2
-        return 1
-    fi
-    fork_export_service "$JOLTEON_FORK_ID" "PG_" || return 1
-    fork_export_service "$AGENT_FORK_ID" "AGENT_PG_" || return 1
-    echo "Using PRD-FORK databases — real customer data, writable"
-    echo "  jolteon: $JOLTEON_FORK_ID ($PG_HOST:$PG_PORT)"
-    echo "  agent:   $AGENT_FORK_ID ($AGENT_PG_HOST:$AGENT_PG_PORT)"
-    return 0
-}
-
 prompt_env() {
     local default="$1"
     local default_num
     case "$default" in
-        dev)      default_num=1 ;;
-        fork)     default_num=2 ;;
-        prd_fork) default_num=3 ;;
-        prd)      default_num=4 ;;
+        dev)  default_num=1 ;;
+        fork) default_num=2 ;;
+        prd)  default_num=3 ;;
     esac
     echo "Select environment:" >&2
-    echo "  1) dev       (writable)" >&2
-    echo "  2) fork      (Tiger fork of dev — for migrations)" >&2
-    echo "  3) prd-fork  (Tiger fork of prd — real data, writable, throwaway)" >&2
-    echo "  4) prd       (read-only)" >&2
+    echo "  1) dev   (writable)" >&2
+    echo "  2) fork  (Tiger fork of dev — for migrations)" >&2
+    echo "  3) prd   (read-only)" >&2
     local choice
     read -rp "Environment [$default_num]: " choice
     case "${choice:-$default_num}" in
-        1|dev)               echo "dev" ;;
-        2|fork)              echo "fork" ;;
-        3|prd-fork|prd_fork) echo "prd_fork" ;;
-        4|prd)               echo "prd" ;;
-        *)                   echo "Invalid choice" >&2; exit 1 ;;
+        1|dev)  echo "dev" ;;
+        2|fork) echo "fork" ;;
+        3|prd)  echo "prd" ;;
+        *)      echo "Invalid choice" >&2; exit 1 ;;
     esac
 }
 
@@ -1409,18 +1299,10 @@ cmd_app_run() {
     # shellcheck source=/dev/null
     source "$env_file"
 
-    # Every value parse_env_flag can produce needs a branch here. A missing one is silent:
-    # no env_* runs, PG_* stays unset, and the first thing to read it fails somewhere far
-    # from the cause. The `*)` arm makes that loud instead.
     case "$env" in
-        dev)      env_dev ;;
-        fork)     env_fork ;;
-        # Not an env_* function: a fork's coordinates change every time one is taken, so
-        # they are resolved from the Tiger CLI rather than maintained by hand. This also
-        # sets AGENT_PG_*, which is why agent_env_prd_fork does not exist either.
-        prd_fork) fork_env_prd || exit 1 ;;
-        prd)      env_prd ;;
-        *)        echo "Error: no env_$env in $env_file." >&2; exit 1 ;;
+        dev)  env_dev ;;
+        fork) env_fork ;;
+        prd)  env_prd ;;
     esac
 
     # Persona override (auth bypass), layered on top of the env above so it wins
@@ -1496,13 +1378,7 @@ cmd_app_run() {
             # purpose: agent-service owns a SEPARATE Postgres but reads the same PG_*
             # variable names as dashboard-api, so inheriting the Jolteon exports points it
             # at the wrong database and it fails looking for its `agent` schema there.
-            # prd_fork already has its AGENT_PG_* set: fork_env_prd resolved BOTH halves of
-            # the pair from the Tiger CLI, which is the point — the two forks have to come
-            # from the same environment, so one function resolves both rather than two
-            # hand-maintained ones that can drift apart.
-            if [ "$env" = "prd_fork" ]; then
-                :
-            elif command -v "agent_env_$env" >/dev/null 2>&1; then
+            if command -v "agent_env_$env" >/dev/null 2>&1; then
                 "agent_env_$env"
             else
                 echo "Error: no agent_env_$env in $env_file." >&2
@@ -1537,11 +1413,6 @@ cmd_app_run() {
             # from dashboard-api's .env instead of keeping a second copy in
             # services/analytics-api/.env — one source, nothing to keep in step.
             agent_export_workos
-
-            # Resolved before anything starts so both the service and the gateway agree on
-            # the URL and the shared secret.
-            local agent_gateway_url agent_gateway_key
-            agent_gateway_env
 
             # Track the same bypass switch as the backend/frontend: analytics-api
             # only bypasses auth when DISABLE_AUTH_RAW is on (a persona, or --prd),
@@ -1578,8 +1449,6 @@ cmd_app_run() {
             (cd "$agent_dir"
              env ANALYTICS_MCP_URL="http://localhost:8003/mcp" \
                  DISABLE_AUTH="$svc_disable_auth" \
-                 LITELLM_BASE_URL="$agent_gateway_url" \
-                 LITELLM_API_KEY="$agent_gateway_key" \
                  PG_HOST="${AGENT_PG_HOST:-}" \
                  PG_PORT="${AGENT_PG_PORT:-5432}" \
                  PG_USER="${AGENT_PG_USER:-}" \
@@ -1625,13 +1494,6 @@ cmd_app_run() {
                 echo "   the reconciler upload will 502. Add it from stcustomerdatadevweu."
                 echo ""
             fi
-
-            # The invoice reconciliation worker, on the SAME database as the backend. It is
-            # part of the agent stack rather than its own flag because after the hand-off
-            # tool landed the assistant can start a check but nothing would run it — a chat
-            # that queues invoices into an empty pipeline looks broken in a way no error
-            # explains. Costs nothing when idle: it polls, finds no invoices, and sleeps.
-            invoice_worker_start "$(invoice_service_dir)" "$env"
 
             if [ -f "$LITELLM_CONFIG" ]; then
                 agent_litellm_start "$agent_dir"
@@ -2061,18 +1923,10 @@ mcp_run_analytics() {
     fi
     # shellcheck source=/dev/null
     source "$env_file"
-    # Every value parse_env_flag can produce needs a branch here. A missing one is silent:
-    # no env_* runs, PG_* stays unset, and the first thing to read it fails somewhere far
-    # from the cause. The `*)` arm makes that loud instead.
     case "$env" in
-        dev)      env_dev ;;
-        fork)     env_fork ;;
-        # Not an env_* function: a fork's coordinates change every time one is taken, so
-        # they are resolved from the Tiger CLI rather than maintained by hand. This also
-        # sets AGENT_PG_*, which is why agent_env_prd_fork does not exist either.
-        prd_fork) fork_env_prd || exit 1 ;;
-        prd)      env_prd ;;
-        *)        echo "Error: no env_$env in $env_file." >&2; exit 1 ;;
+        dev)  env_dev ;;
+        fork) env_fork ;;
+        prd)  env_prd ;;
     esac
 
     if [ -n "${PERSONA:-}" ]; then
@@ -2247,31 +2101,6 @@ agent_litellm_start() {
     return 0
 }
 
-# The local gateway's URL + key, or empty strings when there is no gateway to point at.
-#
-# agent-service chooses its LLM client by whether LITELLM_BASE_URL is set: gateway when it
-# is, direct Anthropic otherwise. That choice has to match the CATALOG the agent database
-# holds. A deployed catalog is gateway-named (`anthropic/claude-opus-5`) and the direct
-# client passes the id through verbatim, so Anthropic 404s on every turn — which is exactly
-# what happens when the gateway is running on :4000 and nothing tells the service about it.
-#
-# The key is read out of the gateway's own config rather than duplicated here, so the two
-# cannot drift: the config's `master_key` IS what agent-service must send as LITELLM_API_KEY.
-agent_gateway_env() {
-    agent_gateway_url=""
-    agent_gateway_key=""
-    [ -f "$LITELLM_CONFIG" ] || return 0
-    agent_gateway_url="http://localhost:4000"
-    agent_gateway_key="$(sed -n 's/^[[:space:]]*master_key:[[:space:]]*//p' "$LITELLM_CONFIG" | head -1)"
-    if [ -z "$agent_gateway_key" ]; then
-        echo ""
-        echo "⚠  No master_key in $LITELLM_CONFIG — agent-service will send 'unset' and the"
-        echo "   gateway will 401 every turn. Add one under general_settings."
-        echo ""
-    fi
-    return 0
-}
-
 agent_ensure_env() {
     local agent_dir="$1" env_file="$1/.env"
     if [ ! -f "$env_file" ]; then
@@ -2289,142 +2118,6 @@ agent_ensure_env() {
         echo "     ANTHROPIC_API_KEY=sk-ant-..."
         echo ""
     fi
-}
-
-# ─── Invoice reconciliation worker ─────────────────────────
-#
-# invoice-service is a WORKER, not a server. `python -m app` polls the Jolteon database
-# for invoices at `uploaded` (translate leg) and `translated` (reconcile leg) and drives
-# each one with its own LLM call. Two consequences shape everything below.
-#
-# It has no port, so there is nothing to lsof: it is backgrounded into the app's process
-# group and dies with the Ctrl+C trap, exactly like litellm. And it reads the platform's
-# modelled cost straight from the database through companion.core — NOT over HTTP — so it
-# needs no analytics-api and no MCP, only PG_* pointing at the same database the backend
-# is on.
-invoice_service_dir() {
-    (cd services/invoice-service 2>/dev/null && pwd) || printf '%s\n' "$REPO/services/invoice-service"
-}
-
-# The worker reads its configuration from the ENVIRONMENT: services/invoice-service has no
-# .env of its own and no .env.example to seed one. Three values it will not start without,
-# lifted from the two .env files that already hold them rather than kept in a third copy:
-#
-#   * CUSTOMER_DATA_STORAGE_CONNECTION_STRING — the account holding the invoice PDF.
-#     dashboard-api's intake uploads there; the worker downloads from the same place.
-#   * ANTHROPIC_API_KEY — the worker calls Anthropic DIRECTLY, never through the local
-#     gateway, so this has to be a real key even when litellm is up.
-#   * RECONCILE_ENABLED — off by default in the service, because reconciling is a
-#     per-invoice LLM + analytics-DB run. Local is exactly where you want it on.
-invoice_export_secrets() {
-    local dash agent line
-    dash="$(cd services/dashboard-api 2>/dev/null && pwd)/.env" || dash="$REPO/services/dashboard-api/.env"
-    agent="$(cd services/agent-service 2>/dev/null && pwd)/.env" || agent="$REPO/services/agent-service/.env"
-    if [ -f "$dash" ] && [ -z "${CUSTOMER_DATA_STORAGE_CONNECTION_STRING:-}" ]; then
-        while IFS= read -r line || [ -n "$line" ]; do
-            case "$line" in CUSTOMER_DATA_STORAGE_CONNECTION_STRING=*) export "$line" ;; esac
-        done < "$dash"
-    fi
-    if [ -f "$agent" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-        while IFS= read -r line || [ -n "$line" ]; do
-            case "$line" in ANTHROPIC_API_KEY=*) export "$line" ;; esac
-        done < "$agent"
-    fi
-    # Both legs, on purpose. Translate alone leaves every invoice at `translated` with no
-    # verdict, which looks like the worker is broken rather than half-configured.
-    export RECONCILE_ENABLED="${RECONCILE_ENABLED:-true}"
-    return 0
-}
-
-# Warn about what the worker needs, then background it. Returns 0 always: a missing
-# credential should not stop the app stack that was the point of the command.
-invoice_worker_start() {
-    local invoice_dir="$1" env="$2"
-
-    if [ ! -d "$invoice_dir" ]; then
-        echo "Warning: $invoice_dir not found — skipping the invoice worker."
-        return 0
-    fi
-
-    # Refused on prd for the same reason `--prd --agent` is, and it is worth being precise
-    # about which half: reconciling READS the platform's cost, which the read-only role can
-    # do. But the worker also WRITES — it moves each invoice uploaded -> translating ->
-    # translated -> reconciling -> ready and stores the translation and the verdict. So the
-    # read-only role cannot run it at all, and a writable one would mean a laptop writing
-    # verdicts into production.
-    #
-    # --prd-fork is the answer rather than an exception to this: a fork is a throwaway copy
-    # on its own host, so writing to it is real data with none of the consequence. That is
-    # the only way to watch this worker reconcile against actual customer invoices.
-    if [ "$env" = "prd" ]; then
-        echo ""
-        echo "⚠  Skipping the invoice worker: --prd is read-only and this worker writes"
-        echo "   invoice status, translations and verdicts."
-        echo "   For real customer data, use --prd-fork ('jt help' → Forks)."
-        echo ""
-        return 0
-    fi
-
-    invoice_export_secrets
-
-    # Both of these make the worker REFUSE TO START (it validates credentials up front so a
-    # misconfigured run fails loudly instead of marking every invoice failed), so say so
-    # rather than letting the stack come up with one service quietly absent.
-    if [ -z "${CUSTOMER_DATA_STORAGE_CONNECTION_STRING:-}" ]; then
-        echo ""
-        echo "⚠  No CUSTOMER_DATA_STORAGE_CONNECTION_STRING — the invoice worker refuses to"
-        echo "   start without it. Add it to services/dashboard-api/.env from"
-        echo "   stcustomerdatadevweu (the same value invoice intake needs)."
-        echo ""
-    fi
-    if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-        echo ""
-        echo "⚠  No ANTHROPIC_API_KEY — the invoice worker refuses to start without it."
-        echo "   Add it to services/agent-service/.env."
-        echo ""
-    fi
-
-    # `:-` rather than a bare expansion: this runs under `set -u`, and an env that somehow
-    # left PG_* unset should show up as a legible warning line, not as an unbound-variable
-    # abort halfway through starting the stack.
-    if [ -z "${PG_HOST:-}" ]; then
-        echo ""
-        echo "⚠  Skipping the invoice worker: no PG_HOST, so it has no database to poll."
-        echo ""
-        return 0
-    fi
-    # A still-templated host, same guard the agent stack has: without it the worker starts,
-    # fails DNS on every pass, and backs off exponentially — which reads as "the worker is
-    # broken" rather than "you have not pasted the fork's host in yet".
-    case "$PG_HOST" in
-        REPLACE_*)
-            echo ""
-            echo "⚠  Skipping the invoice worker: PG_HOST is still a REPLACE_* placeholder."
-            echo "   Take the forks and paste their hosts into ~/.config/jt/environments.sh"
-            echo "   ('jt help' → Forks)."
-            echo ""
-            return 0
-            ;;
-    esac
-    echo "  Invoice worker:  polling $PG_HOST every 10s (translate + reconcile)"
-    # `sed -u` and `-u` on python: without both, the worker's output is invisible whenever
-    # this is not a tty (`jt app run ... > log`), because sed block-buffers and python
-    # buffers its own stdout. A worker whose log only appears in 4KB chunks reads as a
-    # worker that is not running — which is the one thing its log is for.
-    (cd "$invoice_dir" && uv run python -u -m app 2>&1 | sed -u 's/^/[invoice] /') &
-    return 0
-}
-
-# PIDs of invoice workers whose working directory is THIS worktree's invoice-service.
-# `python -m app` is a generic command line — another worktree's worker, or an unrelated
-# `-m app`, must not be killed from here — so the cwd is what identifies ours.
-invoice_worker_pids() {
-    local dir="$1" pid cwd
-    for pid in $(pgrep -f 'python -m app' 2>/dev/null || true); do
-        cwd="$(lsof -a -d cwd -p "$pid" -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
-        [ "$cwd" = "$dir" ] && printf '%s\n' "$pid"
-    done
-    return 0
 }
 
 cmd_agent_run() {
@@ -2500,58 +2193,6 @@ cmd_agent_stop() {
     # restarts). Stop it explicitly when you want it gone:
     echo "Agent DB left running. Stop it with:"
     echo "  docker compose -f $(agent_service_dir)/compose.yaml down"
-}
-
-cmd_invoice_run() {
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            *) echo "Unknown argument: $1"; echo "Usage: jt invoice run"; exit 1 ;;
-        esac
-    done
-
-    local invoice_dir; invoice_dir="$(invoice_service_dir)"
-    if [ ! -d "$invoice_dir" ]; then
-        echo "Error: $invoice_dir not found."
-        echo "Run this from a worktree that has services/invoice-service."
-        exit 1
-    fi
-
-    # Like 'jt agent run', this does NOT pick an environment: the worker reads PG_* from
-    # the environment, so on its own it has no database. It is here for the case where the
-    # app stack is already up in another terminal and you only want to restart the worker.
-    if [ -z "${PG_HOST:-}" ]; then
-        echo ""
-        echo "⚠  No PG_HOST. 'jt invoice run' does not pick an environment — source one"
-        echo "   first, or use 'jt app run --dev --agent', which starts this worker with"
-        echo "   the same database as the backend."
-        echo ""
-    fi
-
-    invoice_export_secrets
-
-    echo ""
-    echo "Starting the invoice reconciliation worker..."
-    echo "  Database:  ${PG_HOST:-<unset>}"
-    echo "  Legs:      translate + reconcile (RECONCILE_ENABLED=$RECONCILE_ENABLED)"
-    echo "  Poll:      every 10s; claims up to 50 invoices a pass"
-    echo ""
-
-    # `trap -` first: `kill 0` signals this shell too, which re-enters the handler and
-    # prints the line once per child otherwise. Disarming makes it fire exactly once.
-    trap 'trap - INT TERM; echo ""; echo "Stopping the invoice worker..."; kill 0' INT TERM
-    (cd "$invoice_dir" && uv run python -m app) &
-    wait
-}
-
-cmd_invoice_stop() {
-    local invoice_dir; invoice_dir="$(invoice_service_dir)"
-    local pids; pids="$(invoice_worker_pids "$invoice_dir")"
-    if [ -n "$pids" ]; then
-        echo "$pids" | xargs kill 2>/dev/null || true
-        echo "Stopped the invoice worker ($(echo "$pids" | tr '\n' ' '))"
-    else
-        echo "No invoice worker running for $invoice_dir."
-    fi
 }
 
 # ─── Browser commands ──────────────────────────────────────
@@ -2710,25 +2351,17 @@ PR (review an existing pull request):
                                        argument.
 
 App (backend + frontend):
-  jt app run [--dev|--fork|--prd-fork|--prd] [--as <persona>] [--agent]
+  jt app run [--dev|--fork|--prd] [--as <persona>] [--agent]
                                        Start backend + frontend (default: dev).
                                        --as <persona> bypasses login as that persona
                                        (root/partner/customer/…, defined in
                                        ~/.config/jt/environments.sh) against the env's DB.
-                                       --prd-fork runs against a Tiger fork of PRODUCTION:
-                                       real customer data, writable, auto-deleted. Take the
-                                       PAIR of forks first (see Forks below) — the agent
-                                       database must come from the same environment as the
-                                       Jolteon one or no org resolves.
                                        --agent also starts the agent-workflow stack:
-                                       analytics-api (:8122) on the SAME database,
-                                       analytics-mcp (:8003), agent-service (:8140), and the
-                                       invoice reconciliation worker on that same database.
-                                       Pair with --as so the MCP's data source is
-                                       auth-bypassed against that DB, e.g.
-                                       'jt app run --dev --as root --agent'. The invoice
-                                       worker is skipped on --prd (it writes; use
-                                       --prd-fork instead).
+                                       analytics-api (:8122) on the SAME --dev/--fork/--prd
+                                       database, analytics-mcp (:8003), and agent-service
+                                       (:8140). Pair with --as so the MCP's data source
+                                       is auth-bypassed against that DB, e.g.
+                                       'jt app run --dev --as root --agent'.
   jt app stop                          Stop backend + frontend (+ the --agent stack;
                                        the agent docker DB is left running)
   jt app forward [--host <ssh-host>]   Tunnel app ports from another machine
@@ -2747,42 +2380,12 @@ MCP:
   jt mcp stop [--analytics] [--port N] Stop MCP service (management: 8002;
                                        --analytics: 8003 + 8122)
 
-Forks (running against real data, writably — not a jt command):
-  Two databases, always as a PAIR from the same environment. Jolteon holds the customer
-  data; agent-service holds conversations AND its own copy of orgs/users/memberships, and
-  it gates every request on that copy — so a jolteon_prd fork beside the dev agent database
-  resolves none of the prod org ids and refuses every conversation.
-
-    gh workflow run tiger_fork.yaml -f project=jolteon       -f environment=prd -f duration=6h
-    gh workflow run tiger_fork.yaml -f project=agent_service -f environment=prd -f duration=6h
-
-  Both are deleted automatically after the duration. Then, per fork:
-
-    tiger service get <fork-id>          # the host
-    az keyvault secret show --vault-name kv-companionenergy-weu \
-      --name tiger-fork-password-<fork-id> --query value -o tsv
-
-  That password is the master role (tsdbadmin). A fork carries prd's roles, so the tidier
-  option is one ALTER ROLE per fork giving developer_user / agent_service_user a password
-  you already have, and connecting as those instead of as a superuser.
-
-  Paste the two hosts into env_prd_fork() / agent_env_prd_fork() in
-  ~/.config/jt/environments.sh, then: jt app run --prd-fork --as root --agent
-
 Agent (the "My Companion" in-product AI assistant):
   jt agent run [--port N]              Start agent-service (default port 8140). Brings up
                                        its own docker Postgres (host port 5433), seeds
                                        services/agent-service/.env from .env.example on
                                        first run, and flags ANTHROPIC_API_KEY if unset.
   jt agent stop [--port N]             Stop agent-service (leaves the docker DB running)
-
-Invoice (the reconciliation worker behind 'start_invoice_check'):
-  jt invoice run                       Start the translate + reconcile worker against
-                                       whatever PG_* is in the environment. Normally you
-                                       want 'jt app run --dev --agent', which starts it
-                                       alongside everything else; this is for restarting
-                                       just the worker. No port: it polls the database.
-  jt invoice stop                      Stop this worktree's invoice worker
 
 Pulse (view dev pulse reports in the locally-run UI):
   jt pulse cors [origin]               Allow the local frontend origin (default
@@ -2902,16 +2505,6 @@ dispatch_agent() {
     esac
 }
 
-dispatch_invoice() {
-    local verb="${1:-}"
-    shift 2>/dev/null || true
-    case "$verb" in
-        run)  cmd_invoice_run "$@" ;;
-        stop) cmd_invoice_stop "$@" ;;
-        *)    echo "Unknown invoice verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
-    esac
-}
-
 dispatch_pulse() {
     local verb="${1:-}"
     shift 2>/dev/null || true
@@ -2984,7 +2577,6 @@ case "$noun" in
     app)            dispatch_app "$@" ;;
     mcp)            dispatch_mcp "$@" ;;
     agent)          dispatch_agent "$@" ;;
-    invoice)        dispatch_invoice "$@" ;;
     pulse)          dispatch_pulse "$@" ;;
     browser)        dispatch_browser "$@" ;;
     sdk)            dispatch_sdk "$@" ;;
