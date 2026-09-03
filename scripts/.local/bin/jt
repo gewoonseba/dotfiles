@@ -393,34 +393,89 @@ parse_env_flag() {
 
 # ─── Tiger forks ───────────────────────────────────────────
 #
-# `--prd-fork` resolves its connection details from the Tiger CLI at launch instead of
-# from environments.sh, and that is the whole design rather than a convenience.
+# `--fork` and `--prd-fork` resolve their connection details from the Tiger CLI at launch
+# instead of from environments.sh, and that is the whole design rather than a convenience.
 #
 # A fork's endpoint does not follow the convention the other environments use: it is the
 # PUBLIC host (`*.db.*`, not `*.privatelink.*`) on a port Tiger assigns per service, so
 # BOTH change every time you take one. Typing them is how you get a password-auth failure
 # against the right host and spend twenty minutes on the wrong suspect.
 #
-# So the only thing written down is the pair of service ids (see the file below). Host,
-# port, role and password come from `tiger db connection-string --with-password`, which
-# reads the password out of the CLI's own store — `~/.pgpass`, put there once with
-# `tiger db save-password <id> --password-storage pgpass`. Nothing secret goes in a file
-# anybody edits, and nothing is copied by hand.
-JT_FORK_CONFIG="$HOME/.config/jt/forks/prd"
+# So the only thing written down is the pair of service ids (in $JT_FORK_DIR, written by
+# `jt fork create`). Host, port, role and password come from `tiger db connection-string
+# --with-password`, which reads the password out of the CLI's own store — `~/.pgpass`.
+# Nothing secret goes in a file anybody edits, and nothing is copied by hand.
+#
+# Forks come in PAIRS from the same environment, and that is not a convention either.
+# Jolteon holds the customer data; agent-service holds conversations AND its own copy of
+# orgs, users and memberships, and it gates every request on that copy — so a prd Jolteon
+# fork beside the dev agent database resolves none of the prd org ids and refuses every
+# conversation. One command takes both so the two cannot drift apart.
+#
+# Note on `set -e`: nearly every helper here inspects a command's OUTPUT and decides what
+# to do about an empty one, so the substitutions carry `|| true`. Without it a Tiger call
+# that exits non-zero kills jt at the assignment and the careful error message below it
+# never prints.
+JT_FORK_DIR="$HOME/.config/jt/forks"
+
+# Which upstream service each half of a pair is forked from, by NAME rather than by id.
+# `tiger service list` resolves the name, which is the same lookup tiger_fork.yaml does —
+# so a service re-created with a new id does not strand this table.
+fork_source_name() {
+    case "$1:$2" in
+        dev:jolteon) echo "jolteon_dev" ;;
+        dev:agent)   echo "agent_service_dev" ;;
+        prd:jolteon) echo "jolteon_prd" ;;
+        prd:agent)   echo "agent_service_prd" ;;
+        *)           return 1 ;;
+    esac
+}
+
+fork_config_path() { echo "$JT_FORK_DIR/$1"; }
+
+# The jt flag that selects an env's fork pair — "--fork" for dev, "--prd-fork" for prd.
+fork_flag() { [ "$1" = "dev" ] && echo "--fork" || echo "--prd-fork"; }
 
 # Tiger API credentials, from Key Vault — the same two secrets the fork workflow reads.
 # Fetched rather than kept on disk, and only when a fork env is actually selected.
 fork_tiger_auth() {
     [ -n "${TIGER_PUBLIC_KEY:-}" ] && [ -n "${TIGER_SECRET_KEY:-}" ] && return 0
     command -v az >/dev/null 2>&1 || { echo "Error: az CLI not found; cannot read Tiger credentials." >&2; return 1; }
-    TIGER_PUBLIC_KEY="$(az keyvault secret show --vault-name kv-companionenergy-weu --name TigerPublicKey --query value -o tsv 2>/dev/null)"
-    TIGER_SECRET_KEY="$(az keyvault secret show --vault-name kv-companionenergy-weu --name TigerSecretKey --query value -o tsv 2>/dev/null)"
+    TIGER_PUBLIC_KEY="$(az keyvault secret show --vault-name kv-companionenergy-weu --name TigerPublicKey --query value -o tsv 2>/dev/null || true)"
+    TIGER_SECRET_KEY="$(az keyvault secret show --vault-name kv-companionenergy-weu --name TigerSecretKey --query value -o tsv 2>/dev/null || true)"
     export TIGER_PUBLIC_KEY TIGER_SECRET_KEY
     if [ -z "$TIGER_PUBLIC_KEY" ] || [ -z "$TIGER_SECRET_KEY" ]; then
         echo "Error: could not read Tiger credentials from Key Vault. Is 'az login' current?" >&2
         return 1
     fi
     return 0
+}
+
+# Everything a fork command needs before it can talk to Tiger.
+fork_preflight() {
+    command -v tiger >/dev/null 2>&1 || { echo "Error: tiger CLI not found (https://cli.tigerdata.com)." >&2; return 1; }
+    command -v jq >/dev/null 2>&1 || { echo "Error: jq not found." >&2; return 1; }
+    fork_tiger_auth || return 1
+}
+
+# Every tiger read goes through here: the version check would otherwise stall the first
+# call of the day on a network round-trip, and JSON is the only output shape worth parsing.
+# Auth is the caller's job, since most helpers make more than one call.
+fork_tiger() {
+    TIGER_VERSION_CHECK_INTERVAL=0 TIGER_OUTPUT=json tiger "$@" 2>/dev/null || true
+}
+
+# The service id behind a name, or empty. `head -1` because a duplicate name would
+# otherwise return two ids on two lines and every later command would see one string.
+fork_resolve_source() {
+    fork_tiger service list | jq -r --arg n "$1" '.[] | select(.name == $n) | .service_id' 2>/dev/null | head -1 || true
+}
+
+# READY / PAUSED / QUEUED / …, or empty when no such service exists — which is the normal
+# state of a fork whose duration ran out, since the cleanup workflow really deletes it.
+fork_service_status() {
+    [ -n "${1:-}" ] || return 0
+    fork_tiger service get "$1" | jq -r '.status // empty' 2>/dev/null || true
 }
 
 # Export <prefix>HOST/PORT/USER/PASSWORD/DATABASE/SSLMODE for one Tiger service.
@@ -430,10 +485,10 @@ fork_export_service() {
     local id="$1" prefix="$2" cs
     fork_tiger_auth || return 1
     cs="$(TIGER_VERSION_CHECK_INTERVAL=0 TIGER_OUTPUT=text \
-            tiger db connection-string "$id" --with-password --password-storage pgpass 2>/dev/null)"
+            tiger db connection-string "$id" --with-password --password-storage pgpass 2>/dev/null || true)"
     if [ -z "$cs" ]; then
         echo "Error: no connection string for Tiger service '$id'." >&2
-        echo "       Is the fork still alive ('tiger service list'), and has its password" >&2
+        echo "       Is the fork still alive ('jt fork status'), and has its password" >&2
         echo "       been stored ('tiger db save-password $id --password-storage pgpass')?" >&2
         return 1
     fi
@@ -456,24 +511,383 @@ fork_export_service() {
     return 0
 }
 
-# Resolve both halves of the prd fork pair. Fails loudly rather than starting half a stack:
-# the Jolteon fork alone gives an assistant that refuses every conversation, which is the
-# confusing failure this pairing exists to prevent.
-fork_env_prd() {
-    if [ ! -f "$JT_FORK_CONFIG" ]; then
-        echo "Error: no fork config at $JT_FORK_CONFIG." >&2
-        echo "       Take a pair of forks and record their ids there — see 'jt help' → Forks." >&2
-        return 1
-    fi
+# Whether ~/.pgpass already holds this service's password, judged the way jt will read it
+# back: ask for a connection string and see whether the userinfo carries a colon. Checked
+# rather than assumed because re-fetching from Key Vault fails on a fork whose secret has
+# expired even when the fork itself is perfectly alive.
+fork_password_stored() {
+    local cs userinfo
+    cs="$(TIGER_VERSION_CHECK_INTERVAL=0 TIGER_OUTPUT=text \
+            tiger db connection-string "$1" --with-password --password-storage pgpass 2>/dev/null || true)"
+    [ -n "$cs" ] || return 1
+    userinfo="${cs#*://}"; userinfo="${userinfo%%@*}"
+    case "$userinfo" in *:*) return 0 ;; *) return 1 ;; esac
+}
+
+# Store one fork's password in ~/.pgpass. Through TIGER_NEW_PASSWORD, never --password: an
+# argv entry is readable in `ps` by every process on the machine for as long as it runs.
+fork_save_password() {
+    TIGER_NEW_PASSWORD="$2" TIGER_VERSION_CHECK_INTERVAL=0 \
+        tiger db save-password "$1" --password-storage pgpass >/dev/null 2>&1
+}
+
+# Read a pair's ids out of its config into JOLTEON_FORK_ID / AGENT_FORK_ID.
+# Unset first: this is sourced more than once per run, and a stale id surviving from the
+# previous read is exactly the bug this file exists to stop — it would connect happily to
+# whatever that id still points at.
+fork_load_config() {
+    local cfg; cfg="$(fork_config_path "$1")"
+    unset JOLTEON_FORK_ID AGENT_FORK_ID
+    [ -f "$cfg" ] || return 1
     # shellcheck source=/dev/null
-    source "$JT_FORK_CONFIG"
-    if [ -z "${JOLTEON_FORK_ID:-}" ] || [ -z "${AGENT_FORK_ID:-}" ]; then
-        echo "Error: $JT_FORK_CONFIG must set both JOLTEON_FORK_ID and AGENT_FORK_ID." >&2
+    source "$cfg"
+    [ -n "${JOLTEON_FORK_ID:-}" ] && [ -n "${AGENT_FORK_ID:-}" ]
+}
+
+# Both halves present and both still answering. Deliberately not "READY": a PAUSED fork is
+# still a fork and Tiger resumes it on connect, so refusing one would send you off to take
+# a fresh pair for no reason.
+fork_pair_alive() {
+    [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
+    [ -n "$(fork_service_status "$1")" ] && [ -n "$(fork_service_status "$2")" ]
+}
+
+# The GitHub login, which is what the fork NAME has to carry — see fork_name.
+fork_actor() {
+    command -v gh >/dev/null 2>&1 || { echo "Error: gh CLI not found; cannot resolve your GitHub login." >&2; return 1; }
+    local login; login="$(gh api user --jq .login 2>/dev/null || true)"
+    [ -n "$login" ] || { echo "Error: could not read your GitHub login. Try 'gh auth login'." >&2; return 1; }
+    echo "$login"
+}
+
+# `{project}-{env}-fork-{actor}-{duration}`, and every part of it is load-bearing for the
+# CLEANUP side rather than for us: tiger_fork_cleanup.yaml runs hourly, selects services
+# matching /-fork-.+-(3h|6h|9h)$/, reads the duration off the end of the name and deletes
+# the fork once created+duration has passed. A fork named anything else is never collected
+# and quietly bills until somebody notices — so this has to keep matching tiger_fork.yaml.
+fork_name() {
+    echo "${1}-${2}-fork-${3}-${4}"
+}
+
+# Take one fork and store its password. Echoes the new service id on stdout; everything
+# else goes to stderr, so the caller can capture the id alone.
+fork_create_one() {
+    local source_name="$1" project="$2" env="$3" actor="$4" duration="$5"
+    local src; src="$(fork_resolve_source "$source_name")"
+    if [ -z "$src" ]; then
+        echo "Error: no Tiger service named '$source_name' to fork from." >&2
         return 1
     fi
+    local name; name="$(fork_name "$project" "$env" "$actor" "$duration")"
+    echo "  $source_name ($src)" >&2
+    echo "  → $name" >&2
+
+    # --last-snapshot: minutes rather than a fresh snapshot of a production-sized database,
+    #   and a snapshot a few hours old is what a fork is for anyway.
+    # --no-wait: both halves are kicked off before either is waited on, so the two come up
+    #   in parallel instead of one after the other.
+    # --no-set-default: forking otherwise makes the fork your default tiger service, which
+    #   then dangles at every bare `tiger db …` once the cleanup job deletes it.
+    # stderr is kept SEPARATE, not folded in with 2>&1: `tiger service fork` narrates its
+    # progress ("🍴 Forking service…") on stderr and prints the JSON on stdout, so merging
+    # the two hands jq a document with prose in front of it and every parse below fails —
+    # after the fork has already been created and started billing.
+    local result stderr_file; stderr_file="$(mktemp)"
+    result="$(TIGER_VERSION_CHECK_INTERVAL=0 TIGER_OUTPUT=json \
+                tiger service fork "$src" --last-snapshot --with-password --no-wait \
+                --no-set-default --name "$name" 2>"$stderr_file" || true)"
+    # From the first brace on, in case a future CLI version narrates on stdout after all.
+    result="$(sed -n '/^[[:space:]]*{/,$p' <<<"$result")"
+    local id; id="$(jq -r '.service_id // empty' <<<"$result" 2>/dev/null || true)"
+    if [ -z "$id" ]; then
+        # Only stderr, never $result: the response body carries the new password in the
+        # clear, and an error path is exactly where it would get pasted into a bug report.
+        echo "Error: fork of '$source_name' failed:" >&2
+        sed 's/^/       /' "$stderr_file" >&2
+        rm -f "$stderr_file"
+        return 1
+    fi
+    rm -f "$stderr_file"
+
+    local pass; pass="$(jq -r '.password // empty' <<<"$result" 2>/dev/null || true)"
+    if [ -z "$pass" ]; then
+        echo "Error: fork '$id' came back without a password, so jt cannot connect to it." >&2
+        return 1
+    fi
+    if ! fork_save_password "$id" "$pass"; then
+        echo "Error: could not save the password for '$id' to ~/.pgpass." >&2
+        return 1
+    fi
+    echo "$id"
+}
+
+# Block until a service leaves QUEUED/CONFIGURING. A fork is not connectable the moment
+# the API hands back an id, and what that causes downstream is a password-auth failure
+# against a host that does exist — the most misleading symptom in this whole path.
+fork_wait_ready() {
+    local id="$1" label="$2" waited=0 status
+    while [ "$waited" -lt 900 ]; do
+        status="$(fork_service_status "$id")"
+        case "$status" in
+            READY|PAUSED) echo "  $label ready after ${waited}s ($id)" >&2; return 0 ;;
+            "")           echo "Error: $label ($id) vanished while coming up." >&2; return 1 ;;
+        esac
+        sleep 10; waited=$((waited + 10))
+        [ $((waited % 60)) -eq 0 ] && echo "  $label still ${status:-?} … ${waited}s" >&2
+    done
+    echo "Error: $label ($id) still not ready after 15m. Check 'jt fork status'." >&2
+    return 1
+}
+
+fork_write_config() {
+    local env="$1" jolteon_id="$2" agent_id="$3" cfg flag taken
+    cfg="$(fork_config_path "$env")"
+    flag="$(fork_flag "$env")"
+    taken="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+    mkdir -p "$JT_FORK_DIR"
+    cat > "$cfg" <<EOF
+# Which Tiger forks 'jt app run $flag' should use. Written by 'jt fork create'.
+#
+# IDS ONLY — no hosts, no ports, no passwords. jt asks the Tiger CLI for those at launch
+# ('tiger db connection-string <id> --with-password'), because a fork's host AND port both
+# change per fork, and the password lives in ~/.pgpass rather than in a file you edit.
+#
+# Both ids are required, and from the SAME environment: agent-service keeps its own copy of
+# orgs, users and memberships and gates every request on it, so a $env jolteon fork beside
+# another environment's agent database resolves no org and refuses every conversation.
+#
+# Taken $taken. Forks are deleted automatically once their duration expires;
+# 'jt fork status' says how long is left, 'jt fork create --$env' takes a fresh pair.
+
+# Fork of ${env}'s jolteon database — customer data, and the invoice rows the worker writes.
+JOLTEON_FORK_ID=$jolteon_id
+
+# Fork of ${env}'s agent_service database — conversations, personas, model catalog, identity mirror.
+AGENT_FORK_ID=$agent_id
+EOF
+    echo "  ids written to $cfg" >&2
+}
+
+# ─── Fork commands ─────────────────────────────────────────
+
+cmd_fork_create() {
+    local env="prd" duration="6h"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --prd) env="prd"; shift ;;
+            --dev) env="dev"; shift ;;
+            --duration) duration="${2:-6h}"; shift 2 ;;
+            *) echo "Usage: jt fork create [--prd|--dev] [--duration 3h|6h|9h]" >&2; return 1 ;;
+        esac
+    done
+    # Only these three, because the cleanup workflow reads the duration off the fork's name
+    # and understands exactly this set. Anything else names a fork it will not collect.
+    case "$duration" in
+        3h|6h|9h) ;;
+        *) echo "Error: --duration must be 3h, 6h or 9h (the cleanup job knows no others)." >&2; return 1 ;;
+    esac
+
+    fork_preflight || return 1
+    local actor; actor="$(fork_actor)" || return 1
+
+    # A live pair already recorded is almost always the answer, since a fork takes minutes
+    # to come up and bills for its whole duration. Say so and let the caller insist.
+    if fork_load_config "$env" && fork_pair_alive "$JOLTEON_FORK_ID" "$AGENT_FORK_ID"; then
+        echo "A live $env fork pair is already recorded:"
+        echo "  jolteon: $JOLTEON_FORK_ID"
+        echo "  agent:   $AGENT_FORK_ID"
+        local reply=""
+        read -rp "Take a fresh pair anyway? [y/N]: " reply || true
+        case "${reply:-n}" in [Yy]*) ;; *) echo "Keeping the existing pair."; return 0 ;; esac
+    fi
+
+    echo "Taking a $env fork pair ($duration, as $actor):"
+    local jolteon_id agent_id
+    jolteon_id="$(fork_create_one "$(fork_source_name "$env" jolteon)" jolteon "$env" "$actor" "$duration")" || return 1
+    if ! agent_id="$(fork_create_one "$(fork_source_name "$env" agent)" agent_service "$env" "$actor" "$duration")"; then
+        # Half a pair is worse than none: it bills for the full duration and jt refuses to
+        # start on it anyway. Name the orphan rather than leaving it to be discovered.
+        echo "" >&2
+        echo "The jolteon half ($jolteon_id) was created but the agent half failed." >&2
+        echo "Delete the orphan so it does not bill for $duration:" >&2
+        echo "  tiger service delete $jolteon_id --confirm" >&2
+        return 1
+    fi
+
+    echo ""
+    echo "Waiting for both (usually 2-5m on --last-snapshot):"
+    fork_wait_ready "$jolteon_id" "jolteon" || return 1
+    fork_wait_ready "$agent_id" "agent" || return 1
+
+    echo ""
+    fork_write_config "$env" "$jolteon_id" "$agent_id"
+    echo "  passwords stored in ~/.pgpass"
+    echo ""
+    echo "Deleted automatically after $duration. Now:"
+    echo "  jt app run $(fork_flag "$env") --as root --agent"
+}
+
+cmd_fork_status() {
+    fork_preflight || return 1
+    local env
+    for env in dev prd; do
+        echo "$env  ($(fork_config_path "$env")):"
+        if ! fork_load_config "$env"; then
+            echo "  no pair recorded — 'jt fork create --$env'"
+            echo ""
+            continue
+        fi
+        local half
+        for half in "jolteon:$JOLTEON_FORK_ID" "agent:$AGENT_FORK_ID"; do
+            local label="${half%%:*}" id="${half#*:}" json status name created
+            json="$(fork_tiger service get "$id")"
+            status="$(jq -r '.status // empty' <<<"$json" 2>/dev/null || true)"
+            if [ -z "$status" ]; then
+                printf '  %-8s %-12s GONE (expired and cleaned up)\n' "$label" "$id"
+                continue
+            fi
+            name="$(jq -r '.name // empty' <<<"$json" 2>/dev/null || true)"
+            created="$(jq -r '.created // empty' <<<"$json" 2>/dev/null || true)"
+            printf '  %-8s %-12s %-10s %-18s %s\n' \
+                "$label" "$id" "$status" "$(fork_remaining "$name" "$created")" "$name"
+        done
+        echo ""
+    done
+}
+
+# How long a fork has left, computed the same way tiger_fork_cleanup.yaml computes it: the
+# duration is carried in the NAME, not by the API, so name plus created is the only source.
+fork_remaining() {
+    local name="$1" created="$2" ttl created_epoch left
+    case "$name" in
+        *-3h) ttl=10800 ;; *-6h) ttl=21600 ;; *-9h) ttl=32400 ;;
+        # No duration suffix means the cleanup job's regex does not match it either, so it
+        # is somebody's hand-made fork and nothing will collect it.
+        *) echo "no expiry (uncollected)"; return 0 ;;
+    esac
+    created_epoch="$(date -d "$created" +%s 2>/dev/null || true)"
+    [ -n "$created_epoch" ] || { echo "?"; return 0; }
+    left=$(( created_epoch + ttl - $(date +%s) ))
+    if [ "$left" -gt 0 ]; then
+        echo "$((left / 3600))h$(( (left % 3600) / 60 ))m left"
+    else
+        echo "overdue for cleanup"
+    fi
+}
+
+cmd_fork_delete() {
+    local env="prd"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --prd) env="prd"; shift ;;
+            --dev) env="dev"; shift ;;
+            *) echo "Usage: jt fork delete [--prd|--dev]" >&2; return 1 ;;
+        esac
+    done
+    fork_preflight || return 1
+    if ! fork_load_config "$env"; then
+        echo "No $env pair recorded — nothing to delete."
+        return 0
+    fi
+    echo "Deleting the $env pair:"
+    echo "  jolteon: $JOLTEON_FORK_ID"
+    echo "  agent:   $AGENT_FORK_ID"
+    local reply=""
+    read -rp "Sure? [y/N]: " reply || true
+    case "${reply:-n}" in [Yy]*) ;; *) echo "Left alone."; return 0 ;; esac
+    local id
+    for id in "$JOLTEON_FORK_ID" "$AGENT_FORK_ID"; do
+        if TIGER_VERSION_CHECK_INTERVAL=0 tiger service delete "$id" --confirm >/dev/null 2>&1; then
+            echo "  deleted $id"
+        else
+            echo "  could not delete $id (already gone?)"
+        fi
+    done
+    rm -f "$(fork_config_path "$env")"
+    echo "Config removed. The cleanup job would have taken these at expiry anyway."
+}
+
+# Record a pair somebody else took — the tiger_fork.yaml workflow, or your other machine.
+# The passwords still have to be in THIS machine's ~/.pgpass, so this stores them from
+# Key Vault, which is where the workflow puts them.
+cmd_fork_use() {
+    local env="prd" ids=()
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --prd) env="prd"; shift ;;
+            --dev) env="dev"; shift ;;
+            *) ids+=("$1"); shift ;;
+        esac
+    done
+    if [ "${#ids[@]}" -ne 2 ]; then
+        echo "Usage: jt fork use <jolteon-fork-id> <agent-fork-id> [--prd|--dev]" >&2
+        return 1
+    fi
+    fork_preflight || return 1
+    local id
+    for id in "${ids[@]}"; do
+        [ -n "$(fork_service_status "$id")" ] || { echo "Error: no live Tiger service '$id'." >&2; return 1; }
+        if fork_password_stored "$id"; then
+            echo "  $id: password already in ~/.pgpass"
+            continue
+        fi
+        local pass; pass="$(az keyvault secret show --vault-name kv-companionenergy-weu \
+                              --name "tiger-fork-password-$id" --query value -o tsv 2>/dev/null || true)"
+        if [ -z "$pass" ]; then
+            echo "Error: no password for '$id' in ~/.pgpass or Key Vault." >&2
+            echo "       Store it by hand, then retry:" >&2
+            echo "       TIGER_NEW_PASSWORD=… tiger db save-password $id --password-storage pgpass" >&2
+            return 1
+        fi
+        fork_save_password "$id" "$pass" || { echo "Error: could not store the password for '$id'." >&2; return 1; }
+        echo "  $id: password stored from Key Vault"
+    done
+    fork_write_config "$env" "${ids[0]}" "${ids[1]}"
+}
+
+# Resolve both halves of a pair into PG_* and AGENT_PG_*, taking a fresh pair when the
+# recorded one is gone. Fails loudly rather than starting half a stack: the Jolteon fork
+# alone gives an assistant that refuses every conversation, which is the confusing failure
+# the pairing exists to prevent.
+fork_env() {
+    local env="$1"
+    fork_preflight || return 1
+
+    local alive=0
+    if ! fork_load_config "$env"; then
+        echo "No $env fork pair recorded ($(fork_config_path "$env"))."
+    elif fork_pair_alive "$JOLTEON_FORK_ID" "$AGENT_FORK_ID"; then
+        alive=1
+    else
+        echo "The recorded $env fork pair is gone — a fork is deleted once its duration expires."
+        echo "  jolteon: $JOLTEON_FORK_ID"
+        echo "  agent:   $AGENT_FORK_ID"
+    fi
+
+    if [ "$alive" -eq 0 ]; then
+        # A prompt rather than a silent create: a fork takes minutes to come up and bills
+        # for its whole duration, so a mistyped flag should not cost either. A
+        # non-interactive caller (a script, an agent) gets the create — nobody to ask.
+        if [ -t 0 ]; then
+            local reply=""
+            read -rp "Take a fresh pair now? [Y/n]: " reply || true
+            case "${reply:-y}" in
+                [Nn]*) echo "Aborting. Run 'jt fork create --$env' when you want one." >&2; return 1 ;;
+            esac
+        else
+            echo "Not a terminal — taking a fresh pair."
+        fi
+        cmd_fork_create "--$env" || return 1
+        fork_load_config "$env" || return 1
+    fi
+
     fork_export_service "$JOLTEON_FORK_ID" "PG_" || return 1
     fork_export_service "$AGENT_FORK_ID" "AGENT_PG_" || return 1
-    echo "Using PRD-FORK databases — real customer data, writable"
+    if [ "$env" = "prd" ]; then
+        echo "Using PRD-FORK databases — real customer data, writable"
+    else
+        echo "Using DEV-FORK databases — a throwaway copy of dev, writable"
+    fi
     echo "  jolteon: $JOLTEON_FORK_ID ($PG_HOST:$PG_PORT)"
     echo "  agent:   $AGENT_FORK_ID ($AGENT_PG_HOST:$AGENT_PG_PORT)"
     return 0
@@ -1403,7 +1817,7 @@ cmd_app_run() {
     if [ ! -f "$env_file" ]; then
         echo "Error: missing $env_file"
         echo ""
-        echo "Create it with env_dev(), env_fork(), env_prd() shell functions."
+        echo "Create it with env_dev() and env_prd() shell functions (both forks come from the Tiger CLI)."
         exit 1
     fi
     # shellcheck source=/dev/null
@@ -1414,11 +1828,12 @@ cmd_app_run() {
     # from the cause. The `*)` arm makes that loud instead.
     case "$env" in
         dev)      env_dev ;;
-        fork)     env_fork ;;
-        # Not an env_* function: a fork's coordinates change every time one is taken, so
-        # they are resolved from the Tiger CLI rather than maintained by hand. This also
-        # sets AGENT_PG_*, which is why agent_env_prd_fork does not exist either.
-        prd_fork) fork_env_prd || exit 1 ;;
+        # Neither fork is an env_* function: a fork's host AND port change every time one
+        # is taken, so both are resolved from the Tiger CLI rather than maintained by hand.
+        # fork_env also sets AGENT_PG_*, which is why there is no agent_env_*fork either —
+        # a pair has to come from ONE environment, so one call resolves both halves.
+        fork)     fork_env dev || exit 1 ;;
+        prd_fork) fork_env prd || exit 1 ;;
         prd)      env_prd ;;
         *)        echo "Error: no env_$env in $env_file." >&2; exit 1 ;;
     esac
@@ -1496,11 +1911,11 @@ cmd_app_run() {
             # purpose: agent-service owns a SEPARATE Postgres but reads the same PG_*
             # variable names as dashboard-api, so inheriting the Jolteon exports points it
             # at the wrong database and it fails looking for its `agent` schema there.
-            # prd_fork already has its AGENT_PG_* set: fork_env_prd resolved BOTH halves of
+            # Either fork already has its AGENT_PG_* set: fork_env resolved BOTH halves of
             # the pair from the Tiger CLI, which is the point — the two forks have to come
             # from the same environment, so one function resolves both rather than two
             # hand-maintained ones that can drift apart.
-            if [ "$env" = "prd_fork" ]; then
+            if [ "$env" = "fork" ] || [ "$env" = "prd_fork" ]; then
                 :
             elif command -v "agent_env_$env" >/dev/null 2>&1; then
                 "agent_env_$env"
@@ -2056,7 +2471,7 @@ mcp_run_analytics() {
     if [ ! -f "$env_file" ]; then
         echo "Error: missing $env_file"
         echo ""
-        echo "Create it with env_dev(), env_fork(), env_prd() shell functions."
+        echo "Create it with env_dev() and env_prd() shell functions (both forks come from the Tiger CLI)."
         exit 1
     fi
     # shellcheck source=/dev/null
@@ -2066,11 +2481,12 @@ mcp_run_analytics() {
     # from the cause. The `*)` arm makes that loud instead.
     case "$env" in
         dev)      env_dev ;;
-        fork)     env_fork ;;
-        # Not an env_* function: a fork's coordinates change every time one is taken, so
-        # they are resolved from the Tiger CLI rather than maintained by hand. This also
-        # sets AGENT_PG_*, which is why agent_env_prd_fork does not exist either.
-        prd_fork) fork_env_prd || exit 1 ;;
+        # Neither fork is an env_* function: a fork's host AND port change every time one
+        # is taken, so both are resolved from the Tiger CLI rather than maintained by hand.
+        # fork_env also sets AGENT_PG_*, which is why there is no agent_env_*fork either —
+        # a pair has to come from ONE environment, so one call resolves both halves.
+        fork)     fork_env dev || exit 1 ;;
+        prd_fork) fork_env prd || exit 1 ;;
         prd)      env_prd ;;
         *)        echo "Error: no env_$env in $env_file." >&2; exit 1 ;;
     esac
@@ -2715,11 +3131,12 @@ App (backend + frontend):
                                        --as <persona> bypasses login as that persona
                                        (root/partner/customer/…, defined in
                                        ~/.config/jt/environments.sh) against the env's DB.
-                                       --prd-fork runs against a Tiger fork of PRODUCTION:
-                                       real customer data, writable, auto-deleted. Take the
-                                       PAIR of forks first (see Forks below) — the agent
-                                       database must come from the same environment as the
-                                       Jolteon one or no org resolves.
+                                       --fork / --prd-fork run against a throwaway Tiger
+                                       fork of dev / of PRODUCTION: writable, auto-deleted.
+                                       Both resolve the fork pair from the Tiger CLI and
+                                       offer to take a fresh one if the recorded pair has
+                                       expired, so there is nothing to set up first
+                                       ('jt fork', below).
                                        --agent also starts the agent-workflow stack:
                                        analytics-api (:8122) on the SAME database,
                                        analytics-mcp (:8003), agent-service (:8140), and the
@@ -2747,27 +3164,41 @@ MCP:
   jt mcp stop [--analytics] [--port N] Stop MCP service (management: 8002;
                                        --analytics: 8003 + 8122)
 
-Forks (running against real data, writably — not a jt command):
-  Two databases, always as a PAIR from the same environment. Jolteon holds the customer
-  data; agent-service holds conversations AND its own copy of orgs/users/memberships, and
-  it gates every request on that copy — so a jolteon_prd fork beside the dev agent database
-  resolves none of the prod org ids and refuses every conversation.
+Fork (a throwaway Tiger copy of a real database, writable):
+  jt fork create [--prd|--dev] [--duration 3h|6h|9h]
+                                       Take a PAIR of forks (default: prd, 6h), store
+                                       their passwords in ~/.pgpass and record their ids
+                                       in ~/.config/jt/forks/<env>. Takes 2-5m. Then
+                                       'jt app run --prd-fork --as root --agent' just works.
+  jt fork status                       Per env: the recorded ids, whether each is still
+                                       alive, and how long it has left.
+  jt fork delete [--prd|--dev]         Delete the pair now instead of waiting for expiry.
+  jt fork use <jolteon-id> <agent-id> [--prd|--dev]
+                                       Adopt a pair somebody else took (the workflow, or
+                                       your other machine): pulls each password from Key
+                                       Vault into ~/.pgpass and records the ids.
+
+  Always a PAIR from the same environment, which is why one command takes both. Jolteon
+  holds the customer data; agent-service holds conversations AND its own copy of
+  orgs/users/memberships, and it gates every request on that copy — so a jolteon_prd fork
+  beside the dev agent database resolves none of the prod org ids and refuses every
+  conversation.
+
+  Only the two service IDS are ever written down. A fork's host AND port both change per
+  fork, so jt asks the Tiger CLI for them at launch and reads the password out of
+  ~/.pgpass — nothing to paste, and nothing secret in a file you edit.
+
+  Forks are deleted automatically once their duration expires (tiger_fork_cleanup.yaml,
+  hourly), which is why 'jt app run --fork/--prd-fork' offers to take a fresh pair when
+  the recorded one has gone rather than failing. The duration lives in the fork's NAME,
+  so 'jt fork create' names them exactly as tiger_fork.yaml does; a differently named
+  fork is never collected and bills until someone notices.
+
+  The workflow route still works if you would rather have the Actions record — then
+  'jt fork use <jolteon-id> <agent-id>' to adopt the result:
 
     gh workflow run tiger_fork.yaml -f project=jolteon       -f environment=prd -f duration=6h
     gh workflow run tiger_fork.yaml -f project=agent_service -f environment=prd -f duration=6h
-
-  Both are deleted automatically after the duration. Then, per fork:
-
-    tiger service get <fork-id>          # the host
-    az keyvault secret show --vault-name kv-companionenergy-weu \
-      --name tiger-fork-password-<fork-id> --query value -o tsv
-
-  That password is the master role (tsdbadmin). A fork carries prd's roles, so the tidier
-  option is one ALTER ROLE per fork giving developer_user / agent_service_user a password
-  you already have, and connecting as those instead of as a superuser.
-
-  Paste the two hosts into env_prd_fork() / agent_env_prd_fork() in
-  ~/.config/jt/environments.sh, then: jt app run --prd-fork --as root --agent
 
 Agent (the "My Companion" in-product AI assistant):
   jt agent run [--port N]              Start agent-service (default port 8140). Brings up
@@ -2912,6 +3343,18 @@ dispatch_invoice() {
     esac
 }
 
+dispatch_fork() {
+    local verb="${1:-status}"
+    shift 2>/dev/null || true
+    case "$verb" in
+        create|new)   cmd_fork_create "$@" ;;
+        status|list|ls) cmd_fork_status ;;
+        delete|rm)    cmd_fork_delete "$@" ;;
+        use)          cmd_fork_use "$@" ;;
+        *)    echo "Unknown fork verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
+    esac
+}
+
 dispatch_pulse() {
     local verb="${1:-}"
     shift 2>/dev/null || true
@@ -2985,6 +3428,7 @@ case "$noun" in
     mcp)            dispatch_mcp "$@" ;;
     agent)          dispatch_agent "$@" ;;
     invoice)        dispatch_invoice "$@" ;;
+    fork)           dispatch_fork "$@" ;;
     pulse)          dispatch_pulse "$@" ;;
     browser)        dispatch_browser "$@" ;;
     sdk)            dispatch_sdk "$@" ;;
