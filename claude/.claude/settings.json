@@ -2,6 +2,10 @@
   "permissions": {
     "defaultMode": "auto"
   },
+  "model": "opus[1m]",
+  "outputStyle": "Concise",
   "tui": "fullscreen",
-  "skipWorkflowUsageWarning": true
+  "skipWorkflowUsageWarning": true,
+  "remoteControlAtStartup": true,
+  "agentPushNotifEnabled": true
 }
