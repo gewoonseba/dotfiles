@@ -197,3 +197,7 @@ fi
 
 # Added by Antigravity CLI installer
 export PATH="/home/gewoonseba/.local/bin:$PATH"
+
+
+# Added by Antigravity CLI installer
+export PATH="/home/sebastianstoelen/.local/bin:$PATH"
