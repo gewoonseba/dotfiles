@@ -1,6 +1,6 @@
 ---
 name: jt
-description: Manage Companion Energy's Jolteon worktrees and run Jolteon services through Sebastian's `jt` CLI. Use whenever work in the Jolteon codebase involves listing, creating, checking out, opening, setting up, removing, or cleaning worktrees; starting work from a GitHub issue or PR; running and stopping the dashboard app, the agent stack (agent-service, LiteLLM gateway, analytics and management MCPs), browser profiles, SDK generation, diff viewer, or docs server; seeding local databases; or taking Tiger forks. Also use when choosing a backing environment (`local`, `dev`, `fork`, `prd-fork`) or deciding between a real login and an auth-bypass persona. Prefer this workflow over raw `git worktree` commands and ad hoc service startup commands.
+description: Manage Companion Energy's Jolteon worktrees and run Jolteon services through Sebastian's `jt` CLI. Use whenever work in the Jolteon codebase involves listing, creating, checking out, opening, setting up, removing, or cleaning worktrees; starting work from a GitHub issue or PR; running and stopping the dashboard app or a parallel per-worktree environment (`jt env`), the agent stack (agent-service, LiteLLM gateway, analytics and management MCPs), browser profiles, SDK generation, diff viewer, or docs server; seeding local databases; or taking Tiger forks. Also use when choosing a backing environment (`local`, `dev`, `fork`, `prd-fork`) or deciding between a real login and an auth-bypass persona. Prefer this workflow over raw `git worktree` commands and ad hoc service startup commands.
 ---
 
 # JT
@@ -63,6 +63,7 @@ Use a PTY or persistent terminal session for long-running commands. Keep their o
 
 | Need | Start | Stop / lifecycle |
 | --- | --- | --- |
+| Your own app, alongside other worktrees' (the default for agents) | `jt env up [--agent]` | `jt env down`; see "Your own environment" below |
 | Dashboard backend + frontend | `jt app run --dev` | `jt app stop`; ports 8000 and 5173 |
 | Dashboard plus the whole agent stack | `jt app run --dev --agent` | `jt app stop`; adds analytics API 8122, analytics MCP 8003, management MCP 8002 (on this backend), agent-service 8140, LiteLLM gateway 4000, and the invoice worker. Every hop is local. |
 | Seeded local databases | `jt db seed`, then `jt app run --local [--agent]` | `jt db status`; `jt db seed` rebuilds `jolteon_seed` + `agent_seed` from scratch |
@@ -97,9 +98,38 @@ Never pick a persona the user or task did not call for. Under the bypass, agent-
 
 Do not print or inspect `~/.config/jt/environments.sh`. `jt` sources it internally and it contains credentials.
 
+### Your own environment (`jt env`)
+
+`jt app run` holds the machine's shared ports, so only one worktree can run it at a time. As an agent, run the app in an environment of your own instead. It is the same `jt app run` in a network namespace of its own: every service keeps its usual port inside, and several environments run side by side.
+
+```bash
+jt env up --agent                                  # from your worktree; drop --agent if you only need frontend + backend
+jt env exec -- curl -s localhost:8000/health       # anything that talks to the app goes through exec
+jt env exec -- agent-browser open http://localhost:5173
+jt env logs                                        # every service's output
+jt env down                                        # when you are done
+```
+
+- The environment is named after the worktree, so commands run from inside it need no name. `jt env list` shows every environment with its state and memory.
+- Reach it only through `jt env exec`. A plain `curl localhost:8000`, or a browser on the host, talks to whatever the host runs, not to your environment. `jt env exec` also gives `agent-browser` a session of its own inside the environment.
+- `--local` is the default: databases of its own, seeded from dev's identities on first start. `--dev` and `--fork` share data with other people.
+- It runs a real login by default, and you cannot type a password. When you must click through the UI yourself, start it with `--as root` (`jt env down`, then `jt env up --as root …`).
+- A full environment (`--agent`) holds about 4.5 GB and a plain one about 2.5 GB, so the machine fits two or three full ones. Check `jt env list` before starting, add `--agent` only when the task touches the assistant or the MCPs, and stop yours when you are done.
+- When you hand a running environment to the user for a manual check, give them both commands exactly as `jt env up` printed them, each in its own `bash` block so it can be copied. First the one for their Mac, where they then open http://localhost:5173:
+
+  ```bash
+  jt app forward --env <name>
+  ```
+
+  and the one for this machine, which opens a browser window inside the environment:
+
+  ```bash
+  jt env open <name>
+  ```
+
 ### Shared ports
 
-Ports 5173, 8000, 8002, 8003, 8122, 8140 and 4000 are shared by every worktree on the machine, and only one app can hold them. `jt app run` refuses to start while another worktree holds them and names the owner. Before taking them, ask the other agent sessions whether they still need the app (`ListAgents`, then `SendMessage`) and act on the answer. `jt app stop` kills whatever holds those ports, including another session's app, so run it only for your own instance or once its owner has released it. Verify with `ss -ltnp | grep -E ':(5173|8000)'` rather than trusting the command's output. The agent Docker database (5433) and Azurite (10000) are deliberately left running.
+This section is about `jt app run`; an environment from `jt env up` holds none of these. Ports 5173, 8000, 8002, 8003, 8122, 8140 and 4000 are shared by every worktree on the machine, and only one app can hold them. `jt app run` refuses to start while another worktree holds them and names the owner. Before taking them, ask the other agent sessions whether they still need the app (`ListAgents`, then `SendMessage`) and act on the answer. `jt app stop` kills whatever holds those ports, including another session's app, so run it only for your own instance or once its owner has released it. Verify with `ss -ltnp | grep -E ':(5173|8000)'` rather than trusting the command's output. The agent Docker database (5433) and Azurite (10000) are deliberately left running.
 
 ## Use Supporting Commands
 

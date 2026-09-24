@@ -1177,6 +1177,354 @@ cmd_db_status() {
     done
 }
 
+# ─── Parallel environments ─────────────────────────────────
+#
+# `jt env` runs a worktree's whole app in its own network namespace, so several worktrees can
+# run it at the same time. Inside, every service keeps its usual port, because each namespace
+# has a localhost of its own. That is also why nothing clashes: an env cannot see the host's
+# ports or another env's, and `jt app stop` inside one cannot touch the rest. The host's
+# Postgres servers and Azurite are passed in by pasta, so `localhost:5432` still works inside.
+#
+# Each env is a systemd user unit (jt-env-<name>). It outlives the shell that started it, its
+# output lands in the journal, and stopping the unit ends every process it started. The three
+# ports a browser uses are published on this machine's loopback at the env's own numbers
+# (JT_ENV_PORT_BASE + 10 per slot); `jt app forward --env <name>` tunnels those to a Mac's usual
+# localhost:5173/8000/8140, so the frontend's hardcoded URLs and the WorkOS redirect still work.
+#
+# The namespace maps your uid to itself, not to root: Chromium refuses to run as root, and a
+# browser inside the env is how a person (`jt env open`) or an agent checks it. Root inside is
+# a spare subordinate uid (/etc/subuid) that nothing runs as.
+JT_ENV_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/jt/envs"
+JT_ENV_PORT_BASE="${JT_ENV_PORT_BASE:-21000}"
+# One full stack (frontend, backend, the agent stack, LiteLLM, the invoice worker) holds about
+# 4.5 GB, a third of it vite; the cap only stops a runaway from taking the whole machine down.
+JT_ENV_MEMORY_MAX="${JT_ENV_MEMORY_MAX:-8G}"
+
+env_state_dir() { echo "$JT_ENV_DIR/$1"; }
+env_unit() { echo "jt-env-$1"; }
+
+# An env is named after its worktree, so an agent in that worktree never has to pass a name.
+env_name_for_worktree() {
+    local base
+    base="$(basename "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-\n' '-' | sed 's/^-*//; s/-*$//')"
+    echo "${base:0:32}"
+}
+
+# The env name to act on: the explicit one, else the current worktree's.
+env_resolve_name() {
+    if [ -n "${1:-}" ]; then echo "$1"; return 0; fi
+    local root
+    root="$(git rev-parse --show-toplevel 2>/dev/null)" \
+        || { echo "Error: no env name given and not in a worktree." >&2; return 1; }
+    env_name_for_worktree "$root"
+}
+
+env_load() {
+    local dir; dir="$(env_state_dir "$1")"
+    [ -f "$dir/env.sh" ] || { echo "Error: no env '$1' ('jt env list')." >&2; return 1; }
+    # shellcheck source=/dev/null
+    source "$dir/env.sh"
+}
+
+# The PID holding the env's namespaces, once the unit has created them and while it lives.
+env_holder() {
+    local pid
+    pid="$(cat "$(env_state_dir "$1")/holder.pid" 2>/dev/null || true)"
+    if [ -n "$pid" ] && [ -d "/proc/$pid" ] && [ "$(readlink "/proc/$pid/ns/net")" != "$(readlink /proc/self/ns/net)" ]; then
+        echo "$pid"
+    fi
+}
+
+# The lowest slot whose three published ports are free here and no running env holds.
+env_free_slot() {
+    local slot port taken f
+    for slot in $(seq 1 20); do
+        taken=0
+        for f in "$JT_ENV_DIR"/*/env.sh; do
+            [ -f "$f" ] || continue
+            if grep -qx "ENV_SLOT=$slot" "$f" \
+               && systemctl --user is-active --quiet "$(env_unit "$(basename "$(dirname "$f")")")"; then
+                taken=1; break
+            fi
+        done
+        [ "$taken" -eq 1 ] && continue
+        for port in $((JT_ENV_PORT_BASE + slot * 10)) $((JT_ENV_PORT_BASE + slot * 10 + 1)) $((JT_ENV_PORT_BASE + slot * 10 + 2)); do
+            ss -ltnH "sport = :$port" 2>/dev/null | grep -q . && { taken=1; break; }
+        done
+        [ "$taken" -eq 0 ] && { echo "$slot"; return 0; }
+    done
+    return 1
+}
+
+# The two commands for looking at an env, each on its own line so it can be copied whole.
+env_print_preview() {
+    local name="$1"
+    echo "Preview from your Mac (then open http://localhost:5173):"
+    echo ""
+    echo "    jt app forward --env $name"
+    echo ""
+    echo "Or on this machine, in a browser window inside the env:"
+    echo ""
+    echo "    jt env open $name"
+    echo ""
+}
+
+cmd_env_up() {
+    local name="" mode="local" agent=0 persona="" _a
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --local|--dev|--fork|--prd-fork) mode="${1#--}"; shift ;;
+            --agent) agent=1; shift ;;
+            --as)    persona="${2:-}"; [ -n "$persona" ] || { echo "--as needs a persona" >&2; return 1; }; shift 2 ;;
+            --name)  name="${2:-}"; shift 2 ;;
+            -*)      echo "Usage: jt env up [--local|--dev|--fork|--prd-fork] [--agent] [--as <persona>] [--name <name>]" >&2; return 1 ;;
+            *)       name="$1"; shift ;;
+        esac
+    done
+    command -v pasta >/dev/null 2>&1 || { echo "Error: pasta not found — install it: sudo pacman -S passt" >&2; return 1; }
+    local root; root="$(git rev-parse --show-toplevel 2>/dev/null)" \
+        || { echo "Error: run this from the Jolteon worktree the env should run." >&2; return 1; }
+    [ -n "$name" ] || name="$(env_name_for_worktree "$root")"
+    case "$name" in [a-z0-9]*) ;; *) echo "Error: env names start with a letter or digit." >&2; return 1 ;; esac
+    local unit; unit="$(env_unit "$name")"
+    if systemctl --user is-active --quiet "$unit"; then
+        echo "Env '$name' is already running."
+        env_print_preview "$name"
+        return 0
+    fi
+    if [ "$mode" = "prd-fork" ]; then mode="prd_fork"; fi
+    if [ "$mode" = "prd_fork" ] && [ -z "$persona" ]; then
+        echo "Error: --prd-fork needs a persona for now: --as root." >&2
+        return 1
+    fi
+    # Forks are shared, billed state: an env uses the recorded pair or none, and never takes
+    # one on its own from inside a unit, where nobody would see the prompt.
+    if [ "$mode" = "fork" ] || [ "$mode" = "prd_fork" ]; then
+        local fork_env_name="dev"; [ "$mode" = "prd_fork" ] && fork_env_name="prd"
+        fork_preflight || return 1
+        if ! fork_load_config "$fork_env_name" || ! fork_pair_alive "$JOLTEON_FORK_ID" "$AGENT_FORK_ID"; then
+            echo "Error: no live $fork_env_name fork pair. Take one first: jt fork create --$fork_env_name" >&2
+            return 1
+        fi
+    fi
+
+    # The worktree has to be set up: the unit does not install anything.
+    local missing=""
+    [ -d "$root/.venv" ] || missing="$missing .venv"
+    [ -d "$root/services/frontend/node_modules" ] || [ -d "$root/node_modules" ] || missing="$missing node_modules"
+    [ -f "$root/services/dashboard-api/.env" ] || missing="$missing services/dashboard-api/.env"
+    if [ -n "$missing" ]; then
+        echo "Error: this worktree is not set up (missing:$missing). Run 'jt setup' in it first." >&2
+        return 1
+    fi
+
+    local db_suffix="${name//-/_}" jolteon_db="" agent_db=""
+    if [ "$mode" = "local" ]; then
+        jolteon_db="jolteon_$db_suffix"; agent_db="agent_$db_suffix"
+        local_db_servers_up || return 1
+        if ! local_db_exists jolteon "$jolteon_db" || ! local_db_exists agent "$agent_db"; then
+            # A separate jt, not cmd_db_seed here: the seeded database names are read once, when
+            # jt starts, so an in-process call would rebuild the default pair instead.
+            echo "Seeding this env's databases ($jolteon_db, $agent_db)..."
+            JT_LOCAL_JOLTEON_DB="$jolteon_db" JT_LOCAL_AGENT_DB="$agent_db" "$(readlink -f "${BASH_SOURCE[0]}")" db seed \
+                | sed -e '/^Now: /d' -e '/^$/d' -e 's/^/  /' \
+                || { echo "Error: seeding this env's databases failed (above)." >&2; return 1; }
+        fi
+    fi
+
+    local slot; slot="$(env_free_slot)" || { echo "Error: no free env slot (20 in use?)." >&2; return 1; }
+    local dir; dir="$(env_state_dir "$name")"
+    mkdir -p "$dir"
+    rm -f "$dir/holder.pid"
+    {
+        printf 'ENV_NAME=%q\n' "$name"
+        printf 'ENV_WORKTREE=%q\n' "$root"
+        printf 'ENV_MODE=%q\n' "$mode"
+        printf 'ENV_AGENT=%q\n' "$agent"
+        printf 'ENV_PERSONA=%q\n' "$persona"
+        printf 'ENV_SLOT=%s\n' "$slot"
+        printf 'ENV_PORT_WEB=%s\n' $((JT_ENV_PORT_BASE + slot * 10))
+        printf 'ENV_PORT_API=%s\n' $((JT_ENV_PORT_BASE + slot * 10 + 1))
+        printf 'ENV_PORT_AGENT=%s\n' $((JT_ENV_PORT_BASE + slot * 10 + 2))
+        printf 'ENV_JOLTEON_DB=%q\n' "$jolteon_db"
+        printf 'ENV_AGENT_DB=%q\n' "$agent_db"
+        printf 'ENV_CREATED=%q\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    } > "$dir/env.sh"
+
+    systemctl --user reset-failed "$unit" >/dev/null 2>&1 || true
+    systemd-run --user --quiet --unit="$unit" --collect \
+        --property=MemoryMax="$JT_ENV_MEMORY_MAX" \
+        --working-directory="$root" \
+        --setenv=PATH="$PATH" --setenv=HOME="$HOME" \
+        -- "$(readlink -f "${BASH_SOURCE[0]}")" env _run "$name" \
+        || { echo "Error: could not start the $unit unit." >&2; return 1; }
+
+    local what="$mode"; [ "$agent" -eq 1 ] && what="$what, full agent stack"
+    echo "Starting env '$name' ($what) — logs: jt env logs $name"
+    local waited=0 ready=0
+    while [ "$waited" -lt 240 ]; do
+        if ! systemctl --user is-active --quiet "$unit"; then
+            echo "Error: env '$name' stopped while starting. Last lines of its log:" >&2
+            journalctl --user -u "$unit" -o cat -n 25 --no-pager >&2
+            return 1
+        fi
+        if [ -n "$(env_holder "$name")" ] \
+           && cmd_env_exec "$name" -- curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8000/health 2>/dev/null \
+           && cmd_env_exec "$name" -- curl -sf -o /dev/null --max-time 2 http://localhost:5173/ 2>/dev/null \
+           && { [ "$agent" -eq 0 ] || cmd_env_exec "$name" -- curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8140/readyz 2>/dev/null; }; then
+            ready=1; break
+        fi
+        sleep 3; waited=$((waited + 3))
+    done
+    if [ "$ready" -eq 0 ]; then
+        echo "Warning: env '$name' is running but not answering yet after ${waited}s — check 'jt env logs $name'." >&2
+    else
+        echo "Env '$name' is up after ${waited}s."
+    fi
+    echo ""
+    env_print_preview "$name"
+}
+
+# The unit's main process. Builds the namespaces, attaches pasta, then becomes `jt app run`
+# inside them — so when the app stops, the unit stops, and systemd ends pasta and the holder.
+cmd_env_run() {
+    local name="$1" dir
+    env_load "$name" || return 1
+    dir="$(env_state_dir "$name")"
+    cd "$ENV_WORKTREE" || return 1
+    local me gid subuid subgid
+    me="$(id -u)"; gid="$(id -g)"
+    subuid="$(awk -F: -v u="$(id -un)" '$1 == u { print $2; exit }' /etc/subuid)"
+    subgid="$(awk -F: -v u="$(id -un)" '$1 == u { print $2; exit }' /etc/subgid)"
+    [ -n "$subuid" ] && [ -n "$subgid" ] || { echo "Error: no /etc/subuid or /etc/subgid range for $(id -un)." >&2; return 1; }
+
+    unshare --user --net --map-users="0:$subuid:1" --map-users="$me:$me:1" \
+        --map-groups="0:$subgid:1" --map-groups="$gid:$gid:1" --setuid="$me" --setgid="$gid" \
+        -- sleep infinity &
+    local holder=$! i
+    for i in $(seq 1 50); do
+        [ -s "/proc/$holder/uid_map" ] && [ "$(readlink "/proc/$holder/ns/net")" != "$(readlink /proc/self/ns/net)" ] && break
+        sleep 0.1
+    done
+    # Browser ports in: the frontend on both loopbacks (vite may bind either), backend and
+    # agent-service on IPv4 where they listen. Host services out: Postgres ×2 and Azurite.
+    pasta --config-net -q --host-lo-to-ns-lo \
+        -t "127.0.0.1/$ENV_PORT_WEB:5173" -t "::1/$ENV_PORT_WEB:5173" \
+        -t "127.0.0.1/$ENV_PORT_API:8000" -t "127.0.0.1/$ENV_PORT_AGENT:8140" \
+        -T 5432,5433,10000 "$holder" \
+        || { echo "Error: pasta could not set up the env's network." >&2; kill "$holder"; return 1; }
+    echo "$holder" > "$dir/holder.pid"
+
+    local -a run=(app run "--$ENV_MODE")
+    [ "$ENV_MODE" = "prd_fork" ] && run=(app run --prd-fork)
+    [ "$ENV_AGENT" = "1" ] && run+=(--agent)
+    [ -n "$ENV_PERSONA" ] && run+=(--as "$ENV_PERSONA")
+    exec nsenter --target "$holder" --user --net --preserve-credentials -- \
+        env JT_LOCAL_JOLTEON_DB="$ENV_JOLTEON_DB" JT_LOCAL_AGENT_DB="$ENV_AGENT_DB" JT_ENV_NAME="$name" \
+        "$(readlink -f "${BASH_SOURCE[0]}")" "${run[@]}"
+}
+
+# Run a command inside an env's network: `jt env exec [name] -- curl localhost:8000/health`.
+# AGENT_BROWSER_SESSION keeps agent-browser's daemon — and its Chromium — inside this env too.
+cmd_env_exec() {
+    local name=""
+    [ "${1:-}" != "--" ] && [ $# -gt 0 ] && { name="$1"; shift; }
+    [ "${1:-}" = "--" ] && shift
+    [ $# -gt 0 ] || { echo "Usage: jt env exec [name] -- <command>" >&2; return 1; }
+    name="$(env_resolve_name "$name")" || return 1
+    local holder; holder="$(env_holder "$name")"
+    [ -n "$holder" ] || { echo "Error: env '$name' is not running ('jt env up')." >&2; return 1; }
+    nsenter --target "$holder" --user --net --preserve-credentials -- \
+        env AGENT_BROWSER_SESSION="jt-env-$name" JT_ENV_NAME="$name" "$@"
+}
+
+# A browser window inside the env, with a profile of its own, for a person to look at it.
+cmd_env_open() {
+    local name; name="$(env_resolve_name "${1:-}")" || return 1
+    local path="${2:-/}"
+    [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] || { echo "Error: no display here. From a Mac, use: jt app forward --env $name" >&2; return 1; }
+    local browser
+    browser="$(command -v chromium || command -v google-chrome-stable || true)"
+    [ -n "$browser" ] || { echo "Error: no chromium or google-chrome-stable to open." >&2; return 1; }
+    mkdir -p "$(env_state_dir "$name")/browser"
+    setsid -f "$(readlink -f "${BASH_SOURCE[0]}")" env exec "$name" -- "$browser" --user-data-dir="$(env_state_dir "$name")/browser" \
+        --no-first-run --new-window "http://localhost:5173${path}" >/dev/null 2>&1
+    echo "Opened env '$name' in a browser window of its own."
+}
+
+cmd_env_logs() {
+    local name="" follow=()
+    while [ $# -gt 0 ]; do
+        case "$1" in -f|--follow) follow=(-f); shift ;; *) name="$1"; shift ;; esac
+    done
+    name="$(env_resolve_name "$name")" || return 1
+    journalctl --user -u "$(env_unit "$name")" -o cat --no-pager -n 200 "${follow[@]}"
+}
+
+cmd_env_ports() {
+    local name; name="$(env_resolve_name "${1:-}")" || return 1
+    env_load "$name" || return 1
+    echo "web=$ENV_PORT_WEB api=$ENV_PORT_API agent=$ENV_PORT_AGENT"
+}
+
+cmd_env_list() {
+    local dir name unit state mem any=0
+    for dir in "$JT_ENV_DIR"/*/; do
+        [ -f "$dir/env.sh" ] || continue
+        name="$(basename "$dir")"
+        (
+            env_load "$name" || exit 0
+            unit="$(env_unit "$name")"
+            state="$(systemctl --user is-active "$unit" 2>/dev/null || true)"
+            mem="$(systemctl --user show -p MemoryCurrent --value "$unit" 2>/dev/null || true)"
+            case "$mem" in ''|'[not set]'|infinity) mem="-" ;; *) mem="$((mem / 1024 / 1024)) MB" ;; esac
+            local what="$ENV_MODE"; [ "$ENV_AGENT" = "1" ] && what="$what+agent"
+            printf '%-32s %-9s %-14s %-9s %s\n' "$name" "$state" "$what" "$mem" "$ENV_WORKTREE"
+            [ "$state" = "active" ] && printf '%-32s preview: jt app forward --env %s   |   jt env open %s\n' "" "$name" "$name"
+        )
+        any=1
+    done
+    [ "$any" -eq 1 ] || echo "No envs. Start one from a worktree: jt env up [--agent]"
+}
+
+cmd_env_down() {
+    local name="" all=0 purge=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --all)   all=1; shift ;;
+            --purge) purge=1; shift ;;
+            *)       name="$1"; shift ;;
+        esac
+    done
+    local -a names=()
+    if [ "$all" -eq 1 ]; then
+        local dir
+        for dir in "$JT_ENV_DIR"/*/; do
+            if [ -f "$dir/env.sh" ]; then names+=("$(basename "$dir")"); fi
+        done
+    else
+        local one; one="$(env_resolve_name "$name")" || return 1
+        names=("$one")
+    fi
+    local n
+    for n in "${names[@]}"; do
+        [ -n "$n" ] || continue
+        if [ -n "$(env_holder "$n")" ]; then
+            cmd_env_exec "$n" -- agent-browser close >/dev/null 2>&1 || true
+        fi
+        systemctl --user stop "$(env_unit "$n")" >/dev/null 2>&1 || true
+        if [ "$purge" -eq 1 ] && env_load "$n" 2>/dev/null && [ -n "$ENV_JOLTEON_DB" ]; then
+            jolteon_psql postgres -c "DROP DATABASE IF EXISTS $ENV_JOLTEON_DB WITH (FORCE)" >/dev/null 2>&1 || true
+            agent_psql postgres -c "DROP DATABASE IF EXISTS $ENV_AGENT_DB WITH (FORCE)" >/dev/null 2>&1 || true
+            rm -rf "$(env_state_dir "$n")"
+            echo "Stopped env '$n' and dropped its databases."
+        else
+            rm -f "$(env_state_dir "$n")/holder.pid"
+            echo "Stopped env '$n' (its databases stay; --purge drops them)."
+        fi
+    done
+}
+
 prompt_env() {
     local default="$1"
     local default_num
@@ -2491,8 +2839,10 @@ cmd_app_stop() {
 # with 'jt app run' there remain reachable at localhost here. Keeping localhost
 # is important: the frontend's local config and WorkOS redirect URI both use it.
 # Defaults to the 'desktop' SSH alias; pass --host macbook for the reverse route.
+# --env <name> tunnels one `jt env` instead: the same three localhost ports here, each mapped to
+# the port that env published over there.
 cmd_app_forward() {
-    local host="desktop"
+    local host="desktop" env_name=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --host)
@@ -2501,19 +2851,42 @@ cmd_app_forward() {
                 host="$2"
                 shift 2
                 ;;
+            --env)
+                [ $# -ge 2 ] && [ -n "$2" ] \
+                    || { echo "Error: --env needs an env name ('jt env list' on the other machine)."; return 1; }
+                env_name="$2"
+                shift 2
+                ;;
             -h|--help)
-                echo "Usage: jt app forward [--host <ssh-host>]"
+                echo "Usage: jt app forward [--env <name>] [--host <ssh-host>]"
                 echo ""
                 echo "Defaults to 'desktop'. Use '--host macbook' for the reverse route."
                 return 0
                 ;;
             *)
                 echo "Unknown argument: $1"
-                echo "Usage: jt app forward [--host <ssh-host>]"
+                echo "Usage: jt app forward [--env <name>] [--host <ssh-host>]"
                 return 1
                 ;;
         esac
     done
+
+    # Where that env published its browser ports, asked of the other machine's own jt. The
+    # remote port per local one: the frontend on IPv6 loopback, where vite listens; the backend
+    # and agent-service on IPv4.
+    local -A remote=([5173]="localhost:5173" [8000]="localhost:8000" [8140]="localhost:8140")
+    if [ -n "$env_name" ]; then
+        local answer
+        answer="$(ssh -o BatchMode=yes "$host" "\$HOME/.local/bin/jt env ports $(printf '%q' "$env_name")" 2>&1)" \
+            || { echo "Error: '$host' has no running env '$env_name': $answer"; return 1; }
+        local web api agent
+        web="$(sed -n 's/.*web=\([0-9]*\).*/\1/p' <<<"$answer")"
+        api="$(sed -n 's/.*api=\([0-9]*\).*/\1/p' <<<"$answer")"
+        agent="$(sed -n 's/.*agent=\([0-9]*\).*/\1/p' <<<"$answer")"
+        [ -n "$web" ] && [ -n "$api" ] && [ -n "$agent" ] \
+            || { echo "Error: unexpected answer from '$host': $answer"; return 1; }
+        remote=([5173]="[::1]:$web" [8000]="127.0.0.1:$api" [8140]="127.0.0.1:$agent")
+    fi
 
     # 8140 = agent-service ("My Companion" AI assistant). Its own docker Postgres
     # (5433) and the analytics MCP (8003) it calls are server-side only, so only
@@ -2564,10 +2937,14 @@ cmd_app_forward() {
 
     local -a fwd=()
     for p in "${ports[@]}"; do
-        fwd+=(-L "$p:localhost:$p")
+        fwd+=(-L "$p:${remote[$p]}")
     done
 
-    echo "Forwarding ports ${ports[*]} from '$host' to localhost."
+    if [ -n "$env_name" ]; then
+        echo "Forwarding env '$env_name' on '$host' to localhost (ports ${ports[*]})."
+    else
+        echo "Forwarding ports ${ports[*]} from '$host' to localhost."
+    fi
     echo "Then open http://localhost:5173"
     echo "Leave this running; press Ctrl+C to stop."
     echo ""
@@ -3523,9 +3900,33 @@ App (backend + frontend):
                                        assistant ignores it and acts as a fixed root admin.
   jt app stop                          Stop backend + frontend (+ the --agent stack;
                                        the agent docker DB is left running)
-  jt app forward [--host <ssh-host>]   Tunnel app ports from another machine
+  jt app forward [--env <name>] [--host <ssh-host>]
+                                       Tunnel app ports from another machine
                                        (default host: desktop)
-                                       (5173/8000/8140) to localhost on this machine
+                                       (5173/8000/8140) to localhost on this machine.
+                                       --env tunnels that machine's 'jt env' of that name.
+
+Env (parallel app stacks, one per worktree, each in its own network namespace):
+  jt env up [--local|--dev|--fork|--prd-fork] [--agent] [--as <persona>]
+                                       From a worktree: run its whole app ('jt app run'
+                                       with those flags) in an env named after the
+                                       worktree. Every service keeps its usual port inside,
+                                       so several envs run at once. Default --local, with
+                                       databases of its own (jolteon_<name>/agent_<name>),
+                                       seeded on first start. A systemd user unit
+                                       (jt-env-<name>): outlives the shell, logs to the journal.
+                                       Prints the preview commands when it is up.
+  jt env exec [name] -- <cmd>          Run a command inside an env (curl localhost:8000,
+                                       agent-browser …). Name defaults to this worktree's.
+  jt env open [name] [path]            A browser window inside the env, with its own
+                                       profile: sign in with your dev account as usual.
+  jt env logs [name] [-f]              The env's output (every service).
+  jt env list                          Envs, state, memory, and their preview commands.
+  jt env down [name|--all] [--purge]   Stop an env; --purge also drops its databases.
+
+  From a Mac, preview an env on this machine with: jt app forward --env <name>
+  (then http://localhost:5173). One env at a time per Mac. A full env (--agent) holds
+  about 4.5 GB, a plain one about 2.5 GB; each is capped at JT_ENV_MEMORY_MAX (default 8G).
 
 MCP:
   jt mcp run [--dev|--fork|--prd] [--port N]  Start the management MCP
@@ -3645,6 +4046,7 @@ Examples:
   jt wt open feat/battery-charts
   jt app run --dev --agent
   jt db seed && jt app run --local --agent
+  jt env up --agent && jt env exec -- curl -s localhost:8000/health
   jt app run --prd-fork --as root --agent
   jt app forward
   jt mcp run --dev
@@ -3742,6 +4144,22 @@ dispatch_fork() {
     esac
 }
 
+dispatch_env() {
+    local verb="${1:-list}"
+    shift 2>/dev/null || true
+    case "$verb" in
+        up|start)    cmd_env_up "$@" ;;
+        down|stop)   cmd_env_down "$@" ;;
+        exec|x)      cmd_env_exec "$@" ;;
+        open)        cmd_env_open "$@" ;;
+        logs|log)    cmd_env_logs "$@" ;;
+        list|ls)     cmd_env_list ;;
+        ports)       cmd_env_ports "$@" ;;
+        _run)        cmd_env_run "$@" ;;
+        *)    echo "Unknown env verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
+    esac
+}
+
 dispatch_db() {
     local verb="${1:-status}"
     shift 2>/dev/null || true
@@ -3827,6 +4245,7 @@ case "$noun" in
     invoice)        dispatch_invoice "$@" ;;
     fork)           dispatch_fork "$@" ;;
     db)             dispatch_db "$@" ;;
+    env)            dispatch_env "$@" ;;
     pulse)          dispatch_pulse "$@" ;;
     browser)        dispatch_browser "$@" ;;
     sdk)            dispatch_sdk "$@" ;;

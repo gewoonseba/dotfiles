@@ -38,6 +38,12 @@ the rules and the traps carry over unchanged.
 
 ## 0. Coordinate — only one app instance runs on this machine
 
+**For Jolteon, skip the coordination: record in an environment of your own.** `jt env up --as root`
+runs the whole app in a network namespace of its own, beside everyone else's, and
+`jt env exec -- agent-browser …` drives and records a browser inside it (see the `jt` skill,
+"Your own environment"). The rest of this section applies only when you use the shared
+`jt app run`.
+
 Ports 5173/8000 are shared across every worktree on this machine, and only one app can hold
 them. `jt app run` **refuses to start** when another worktree holds them, printing the owning
 worktree and the pids:
@@ -107,7 +113,8 @@ state alone.
 *Jolteon commands shown; see the `jt` skill for the full CLI.*
 
 ```bash
-jt app run --dev --as root      # the persona: an agent cannot type a password. Never --prd-fork
+jt env up --as root             # your own env; then prefix browser commands with: jt env exec --
+jt app run --dev --as root      # or the shared app. The persona: an agent cannot type a password. Never --prd-fork
 ```
 
 Dev is fast but thin — expect whole date ranges with no data. If a demo genuinely needs real
