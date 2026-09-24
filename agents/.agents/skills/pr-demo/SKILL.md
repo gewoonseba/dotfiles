@@ -33,8 +33,8 @@ the rules and the traps carry over unchanged.
    reviewer hunt for the moment that matters, and a reviewer skimming on a phone will not
    play it at all. The prose has to stand alone.
 3. **Never record against production.** A video of a real customer's figures ends up on a
-   PR that many people and every future reader can see. `jt app run --dev`. Read-only prod
-   is not a safe exception — reading is exactly the problem.
+   PR that many people and every future reader can see. `jt app run --dev`. A fork of
+   production (`--prd-fork`) is not a safe exception — the data is exactly the problem.
 
 ## 0. Coordinate — only one app instance runs on this machine
 
@@ -80,9 +80,9 @@ pstree -sap <pid>                            # walk up: sshd / herdr => a human,
 ```
 
 Two tells that a process is a person's, not a peer agent's: an `sshd-session` or remote-bridge
-ancestor, and a flag no agent in the conversation claims — `--prd` when every peer says they
-only ran `--dev` or `--prd-fork`. `--prd` means it is pointed at **production** and somebody is
-probably looking at it right now.
+ancestor, and a flag no agent in the conversation claims — `--prd-fork` when every peer says
+they only ran `--dev` or `--local`. `--prd-fork` means it is on **production** data and somebody
+is probably looking at it right now.
 
 `jt app stop` releases the ports explicitly, including another worktree's instance — and it
 kills a human's session just as silently as an agent's. There is no undo: the app comes back
@@ -107,7 +107,7 @@ state alone.
 *Jolteon commands shown; see the `jt` skill for the full CLI.*
 
 ```bash
-jt app run --dev --as root      # never --prd / --prd-fork for anything going on a PR
+jt app run --dev --as root      # the persona: an agent cannot type a password. Never --prd-fork
 ```
 
 Dev is fast but thin — expect whole date ranges with no data. If a demo genuinely needs real

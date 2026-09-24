@@ -1,11 +1,11 @@
 ---
 name: jt
-description: Manage Companion Energy's Jolteon worktrees and run Jolteon services through Sebastian's `jt` CLI. Use whenever work in the Jolteon codebase involves listing, creating, checking out, opening, setting up, removing, or cleaning worktrees; starting work from a GitHub issue or PR; or running and stopping the dashboard app, management or analytics MCP, agent-service, browser profiles, SDK generation, diff viewer, or docs server. Also use when choosing `lcl`, `dev`, or `prd` backing environments or an auth-bypass persona. Prefer this workflow over raw `git worktree` commands and ad hoc service startup commands.
+description: Manage Companion Energy's Jolteon worktrees and run Jolteon services through Sebastian's `jt` CLI. Use whenever work in the Jolteon codebase involves listing, creating, checking out, opening, setting up, removing, or cleaning worktrees; starting work from a GitHub issue or PR; running and stopping the dashboard app, the agent stack (agent-service, LiteLLM gateway, analytics and management MCPs), browser profiles, SDK generation, diff viewer, or docs server; seeding local databases; or taking Tiger forks. Also use when choosing a backing environment (`local`, `dev`, `fork`, `prd-fork`) or deciding between a real login and an auth-bypass persona. Prefer this workflow over raw `git worktree` commands and ad hoc service startup commands.
 ---
 
 # JT
 
-Use `jt` as the orchestration layer for Jolteon. It owns worktree paths, environment-file copying, dependency setup, pinned runtimes, service ports, and coordinated shutdown.
+Use `jt` as the orchestration layer for Jolteon. It owns worktree paths, environment-file copying, dependency setup, pinned runtimes, service ports, local databases, Tiger forks, and coordinated shutdown.
 
 ## Establish Context
 
@@ -41,7 +41,7 @@ Use the narrowest matching command:
 | Enter or edit | `jt open <branch>` / `jt worktree edit <branch>` | Enters a shell or opens Zed. Prefer an explicit automation working directory when acting as an agent. |
 | Safely remove one | `jt remove <branch>` | Prompts, refuses a dirty worktree, and deletes the local branch only when Git considers it merged. |
 
-Managed worktrees live under `~/work/worktrees/jolteon` (or the existing `~/Work` variant). A branch such as `feat/example` maps to a slash-free directory such as `feat-example`, but prefer `jt worktree list` over guessing.
+Managed worktrees live under `~/Work/worktrees/jolteon` (or the `~/work` variant). A branch such as `feat/example` maps to a slash-free directory such as `feat-example`, but prefer `jt worktree list` over guessing. Worktrees an agent harness creates (for example under `~/Work/jolteon/.claude/worktrees/`) start without env files or dependencies, and the app's services crash at import until they are set up.
 
 After creating or checking out a worktree, dependency installation continues in `<worktree>/.jt-setup.log`. If dependencies are not ready or setup failed, inspect that log and run `jt worktree setup <branch-or-path>` for a blocking retry.
 
@@ -59,34 +59,55 @@ First set the command's working directory to the intended worktree root. This is
 test "$(git rev-parse --show-toplevel)" = "$PWD"
 ```
 
-Use a PTY or persistent terminal session for long-running commands. Keep their output visible, verify the announced endpoint, and use the matching `jt ... stop` command when the process should not remain running.
+Use a PTY or persistent terminal session for long-running commands. Keep their output visible, verify the announced endpoints, and use the matching `jt ... stop` command when the process should not remain running.
 
 | Need | Start | Stop / lifecycle |
 | --- | --- | --- |
-| Dashboard backend + frontend | `jt app run --lcl` | `jt app stop`; ports 8000 and 5173 |
-| Dashboard plus complete agent workflow | `jt app run --lcl --as <persona> --agent` | `jt app stop`; also runs analytics API 8122, analytics MCP 8003, and agent-service 8140 |
-| Management MCP only | `jt mcp run --lcl` | `jt mcp stop`; default port 8002 |
-| Analytics MCP stack only | `jt mcp run --analytics --lcl --as <persona>` | `jt mcp stop --analytics`; MCP 8003 plus analytics API 8122 |
+| Dashboard backend + frontend | `jt app run --dev` | `jt app stop`; ports 8000 and 5173 |
+| Dashboard plus the whole agent stack | `jt app run --dev --agent` | `jt app stop`; adds analytics API 8122, analytics MCP 8003, management MCP 8002 (on this backend), agent-service 8140, LiteLLM gateway 4000, and the invoice worker. Every hop is local. |
+| Seeded local databases | `jt db seed`, then `jt app run --local [--agent]` | `jt db status`; `jt db seed` rebuilds `jolteon_seed` + `agent_seed` from scratch |
+| Production data | `jt app run --prd-fork --as root [--agent]` | Runs on a Tiger fork pair (see below); throwaway, auto-deleted |
+| Management MCP only | `jt mcp run --dev` | `jt mcp stop`; port 8002, pointed at the *deployed* dashboard-api of that env |
+| Analytics MCP stack only | `jt mcp run --analytics --dev --as <persona>` | `jt mcp stop --analytics`; MCP 8003 plus analytics API 8122 |
 | Agent-service only | `jt agent run` | `jt agent stop`; service 8140, its Docker Postgres remains running on 5433 |
 | Headed authenticated browser | `jt browser open <profile> [url]` | `jt browser stop` |
 
-Select the backing environment deliberately:
+### Environments
 
-- `--lcl`: use the local development environment.
-- `--dev`: run local processes against the shared development backing environment.
-- `--prd`: run local processes against production backing data. Use only when the user explicitly intends production access.
-- `--as <persona>`: bypass normal auth as a configured persona against the selected environment's database. Never assume a persona; use the one the user requested or the task explicitly requires.
+Always pass an environment flag to `jt app run` and `jt mcp run`. Without one they prompt, defaulting to `dev`.
 
-When acting as an agent, always pass an environment flag to `jt app run` and `jt mcp run`. Without one, `jt app run` prompts with `lcl` as the default while `jt mcp run` prompts with `dev` as the default. Do not print or inspect `~/.config/jt/environments.sh`; `jt` sources it internally and it may contain credentials.
+- `--dev`: the shared development databases. Writable and shared with the team, so treat writes as visible to others.
+- `--local`: seeded databases on this machine (`jolteon_seed` on :5432, `agent_seed` on :5433), built by `jt db seed` from the migrations plus dev's real organizations, users and memberships (same ids, so the dev login works) and a demo site. Disposable. `jt db seed` refuses while any session has those databases open. That is usually another worktree's running app, so ask before passing `--force`. Set `JT_LOCAL_JOLTEON_DB` / `JT_LOCAL_AGENT_DB` to seed and run a separate pair instead.
+- `--fork`: a throwaway Tiger fork of dev. Take one when a change involves a migration.
+- `--prd-fork`: a throwaway Tiger fork of production: real customer data, writable. Use it only when the user explicitly wants production data, and never for anything recorded or posted on a PR. It requires `--as`.
+- `--prd`: refused by `jt app run`. It still exists for `jt mcp run`, where it means the deployed production dashboard-api.
 
-`jt app run` stops existing listeners in its known service set before starting. `jt app stop` stops process groups listening on ports 8000, 5173, 8122, 8003, and 8140, but deliberately leaves the agent Docker database running. Avoid stopping services that belong to another active task.
+Forks come in pairs (Jolteon + agent-service) and are shared state across every worktree. `jt fork status` shows what is recorded and how long it has left. `jt app run --fork/--prd-fork` offers to take a fresh pair when the recorded one has expired. That takes 2–5 minutes and bills a production-sized instance for its whole duration, so reuse a live pair, and ask before replacing one somebody else took. `jt fork create/delete/use` manage pairs explicitly.
+
+### Signing in
+
+By default every mode is a real login: open http://localhost:5173 and sign in with a dev WorkOS account. That needs a person at the keyboard.
+
+`--as <persona>` is the auth bypass. Personas such as `root`, `partner` and `customer` are defined in `~/.config/jt/environments.sh`; on `--local` the dev ones apply. Use it only when:
+
+- the environment requires it (`--prd-fork`), or
+- you, an agent, must drive the browser yourself and cannot type a password.
+
+Never pick a persona the user or task did not call for. Under the bypass, agent-service ignores the persona and always acts as one fixed root global admin. So the assistant works on whichever customer the browser views, files conversations under that fixed user, cannot forward a token to invoice intake, and does not exercise access checks.
+
+Do not print or inspect `~/.config/jt/environments.sh`. `jt` sources it internally and it contains credentials.
+
+### Shared ports
+
+Ports 5173, 8000, 8002, 8003, 8122, 8140 and 4000 are shared by every worktree on the machine, and only one app can hold them. `jt app run` refuses to start while another worktree holds them and names the owner. Before taking them, ask the other agent sessions whether they still need the app (`ListAgents`, then `SendMessage`) and act on the answer. `jt app stop` kills whatever holds those ports, including another session's app, so run it only for your own instance or once its owner has released it. Verify with `ss -ltnp | grep -E ':(5173|8000)'` rather than trusting the command's output. The agent Docker database (5433) and Azurite (10000) are deliberately left running.
 
 ## Use Supporting Commands
 
 - Run `jt sdk generate` to regenerate the dashboard API TypeScript SDK. It requires the dashboard API on port 8000 and writes generated code; review the resulting diff.
+- Run `jt invoice run` / `jt invoice stop` to restart only the invoice reconciliation worker. `jt app run --agent` already starts it.
 - Run `jt diff open [--base <branch>]` and `jt diff stop` for the local diff viewer.
 - Run `jt docs serve [dir] [--port N]` to expose `.context` or another directory over HTTP. It binds beyond localhost, so serve only intended content.
 - Run `jt pulse cors [origin]` only when explicitly asked to configure dev pulse-report access; it changes Azure Storage CORS.
-- Before `jt app forward`, load and follow the `machine-ssh` skill because forwarding accesses the other machine and uses its SSH aliases. The tunnel exposes remote ports 5173, 8000, and 8140 locally.
+- Before `jt app forward`, load and follow the `machine-ssh` skill because forwarding accesses the other machine and uses its SSH aliases. The tunnel exposes remote ports 5173, 8000 and 8140 locally.
 
 `jt` does not replace Jolteon's test, lint, migration, or one-off package commands. Use it to select and prepare the worktree and to run the supported service stacks, then follow the target worktree's repository instructions for everything else.

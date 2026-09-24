@@ -350,22 +350,23 @@ post_create_worktree() {
     exit 0
 }
 
-# Parse --dev/--fork/--prd-fork/--prd flags into $ENV_CHOICE. Unknown args go to
+# Parse --local/--dev/--fork/--prd-fork/--prd flags into $ENV_CHOICE. Unknown args go to
 # $REMAINING_ARGS.
 #
-# Four environments, no local:
+# The environments, each signed into with your real dev account (except prd-fork):
+#   local     seeded databases on this machine (`jt db seed`) — dev's identities, disposable
 #   dev       the day-to-day writable one
 #   fork      a Tiger fork of DEV — take one when your change involves a migration
-#   prd-fork  a Tiger fork of PRD — real customer data, writable, auto-deleted. The only
-#             way to exercise something that WRITES against real data: --prd connects as
-#             developer_readonly, so a worker that moves invoice status cannot run there.
-#   prd       read-only
+#   prd-fork  a Tiger fork of PRD — real customer data, writable, auto-deleted. The one way to
+#             see production data locally; entered with a persona (--as) for now.
+#   prd       read-only prd — left only for `jt mcp run`; `jt app run` refuses it
 parse_env_flag() {
     ENV_CHOICE=""
     PERSONA=""
     REMAINING_ARGS=()
     while [ $# -gt 0 ]; do
         case "$1" in
+            --local|--lcl) ENV_CHOICE="local"; shift ;;
             --dev)  ENV_CHOICE="dev"; shift ;;
             --fork) ENV_CHOICE="fork"; shift ;;
             # Underscored, not hyphenated: the value is interpolated into function names
@@ -373,10 +374,6 @@ parse_env_flag() {
             # in a shell identifier.
             --prd-fork|--prdfork) ENV_CHOICE="prd_fork"; shift ;;
             --prd)  ENV_CHOICE="prd"; shift ;;
-            --lcl)
-                echo "--lcl is gone: this setup runs against dev, a Tiger fork (--fork), or read-only prd." >&2
-                exit 1
-                ;;
             --as)
                 # --as <persona>; a bare --as (or one followed by another flag)
                 # defaults to root.
@@ -724,7 +721,11 @@ cmd_fork_create() {
     echo "  passwords stored in ~/.pgpass"
     echo ""
     echo "Deleted automatically after $duration. Now:"
-    echo "  jt app run $(fork_flag "$env") --as root --agent"
+    if [ "$env" = "prd" ]; then
+        echo "  jt app run --prd-fork --as root --agent"
+    else
+        echo "  jt app run --fork --agent"
+    fi
 }
 
 cmd_fork_status() {
@@ -893,6 +894,289 @@ fork_env() {
     return 0
 }
 
+# ─── Local databases ───────────────────────────────────────
+#
+# --local runs on jolteon_seed (:5432) beside agent_seed (:5433), both rebuilt by `jt db seed`
+# from the migrations, dev's identities and a small fixture. You sign in to it with your real
+# dev account, which is why the identities come from dev rather than being made up.
+#
+# Both servers are the ones the repo already defines — Jolteon's timescaledb in the root
+# docker-compose.yml, agent-service's postgres in services/agent-service/compose.yaml. The
+# seeded databases sit beside what is already there under their own names, so neither the
+# `jolteon` database the repo docs use nor the `agent` one its tests use is touched by a seed.
+# Overridable so a second session can seed and run its own pair without ending the first's.
+LOCAL_JOLTEON_DB="${JT_LOCAL_JOLTEON_DB:-jolteon_seed}"
+LOCAL_AGENT_DB="${JT_LOCAL_AGENT_DB:-agent_seed}"
+
+# psql against one of the two local servers. -X skips ~/.psqlrc so output stays parseable.
+# PGOPTIONS keeps server NOTICEs ("does not exist, skipping") out of the output.
+jolteon_psql() {
+    local db="$1"; shift
+    PGPASSWORD=energy PGOPTIONS='-c client_min_messages=warning' \
+        psql -h localhost -p 5432 -U jolteon -d "$db" -X -q -v ON_ERROR_STOP=1 "$@"
+}
+agent_psql() {
+    local db="$1"; shift
+    PGPASSWORD=agent PGOPTIONS='-c client_min_messages=warning' \
+        psql -h localhost -p 5433 -U agent -d "$db" -X -q -v ON_ERROR_STOP=1 "$@"
+}
+
+# local_db_exists <jolteon|agent> <database>
+local_db_exists() {
+    [ -n "$("${1}_psql" postgres -Atc "SELECT 1 FROM pg_database WHERE datname = '$2'" 2>/dev/null || true)" ]
+}
+
+# Both docker Postgres servers answering, starting whichever is not. Checked with pg_isready
+# first so a shell without docker access still works while the containers are up.
+local_db_servers_up() {
+    pg_isready -h localhost -p 5432 -q && pg_isready -h localhost -p 5433 -q && return 0
+    command -v docker >/dev/null 2>&1 || { echo "Error: the local Postgres servers are down and docker is not installed." >&2; return 1; }
+    echo "Starting the local Postgres servers..."
+    # $REPO's compose file, never a worktree's: compose names the project after the directory
+    # and binds `.data` relative to the file, so a worktree's copy would start a second
+    # timescaledb on an empty data directory — and collide on the fixed container_name.
+    if ! pg_isready -h localhost -p 5432 -q; then
+        docker compose -f "$REPO/docker-compose.yml" up -d --wait timescaledb >/dev/null \
+            || { echo "Error: could not start timescaledb ($REPO/docker-compose.yml)." >&2; return 1; }
+    fi
+    if ! pg_isready -h localhost -p 5433 -q; then
+        docker compose -f "$(agent_service_dir)/compose.yaml" up -d --wait >/dev/null \
+            || { echo "Error: could not start the agent database (services/agent-service/compose.yaml)." >&2; return 1; }
+    fi
+}
+
+# The seeded Jolteon database, as PG_*. Here rather than in environments.sh because nothing
+# about it is secret or differs per machine.
+env_local() {
+    local_db_servers_up || return 1
+    if ! local_db_exists jolteon "$LOCAL_JOLTEON_DB"; then
+        echo "Error: no $LOCAL_JOLTEON_DB database yet. Run 'jt db seed' first." >&2
+        return 1
+    fi
+    export PG_HOST="localhost" PG_PORT="5432" PG_USER="jolteon" PG_PASSWORD="energy" PG_DATABASE="$LOCAL_JOLTEON_DB"
+    echo "Using LOCAL seeded database ($LOCAL_JOLTEON_DB)"
+}
+
+# agent-service's database for --local, as AGENT_PG_*. sslmode=disable because the docker
+# server has no TLS; with auth on, `require` would boot a service whose /readyz says db down.
+agent_env_docker() {
+    export AGENT_PG_HOST="localhost" AGENT_PG_PORT="5433" AGENT_PG_USER="agent" AGENT_PG_PASSWORD="agent" \
+           AGENT_PG_DATABASE="$1" AGENT_PG_SSLMODE="disable"
+    echo "Agent DB: local ($1)"
+}
+
+# Replace agent_db's identity mirror with jolteon_db's organizations, users and memberships,
+# selected exactly as dashboard-api's identity-sync publisher selects them — the feed that
+# fills the mirror in a deployed environment and cannot reach a laptop. A wholesale replace is
+# safe: nothing references the mirror tables, so conversations are untouched.
+local_mirror_identity() {
+    local jolteon_db="$1" agent_db="$2" tmp
+    tmp="$(mktemp -d)"
+    jolteon_psql "$jolteon_db" -c "\copy (SELECT id, external_idp_id, name, type, coalesce(additional_features, '{}') FROM common.organization WHERE external_idp_id IS NOT NULL AND datetime_deletion_scheduled_utc IS NULL) TO '$tmp/org.tsv'" \
+        && jolteon_psql "$jolteon_db" -c "\copy (SELECT id, external_idp_id, email FROM common.\"user\") TO '$tmp/user.tsv'" \
+        && jolteon_psql "$jolteon_db" -c "\copy (SELECT m.user_id, m.organization_id, r.slug, m.state = 'active' FROM common.organization_membership m JOIN common.organization_role r ON r.id = m.role_id) TO '$tmp/membership.tsv'" \
+        && agent_psql "$agent_db" <<SQL
+BEGIN;
+CREATE TEMP TABLE o (id uuid, external_idp_id text, name text, type text, additional_features text[]) ON COMMIT DROP;
+CREATE TEMP TABLE u (id uuid, external_idp_id text, email text) ON COMMIT DROP;
+CREATE TEMP TABLE m (user_id uuid, organization_id uuid, role text, active boolean) ON COMMIT DROP;
+\copy o FROM '$tmp/org.tsv'
+\copy u FROM '$tmp/user.tsv'
+\copy m FROM '$tmp/membership.tsv'
+DELETE FROM agent.user_organization;
+DELETE FROM agent.organization;
+DELETE FROM agent.app_user;
+INSERT INTO agent.organization (id, external_idp_id, name, type, additional_features) SELECT * FROM o;
+INSERT INTO agent.app_user (id, external_idp_id, email) SELECT * FROM u;
+INSERT INTO agent.user_organization (user_id, organization_id, role, active) SELECT * FROM m;
+COMMIT;
+SQL
+    local rc=$?
+    rm -rf "$tmp"
+    return "$rc"
+}
+
+# Copy the identities a real dev login needs from the dev Jolteon database into the seed:
+# every role, organization, user, membership and partner link, keeping dev's UUIDs and WorkOS
+# ids. Both halves matter. The WorkOS ids are what a dev login's token carries, so without
+# them nobody resolves. The UUIDs are what dashboard-api pushes into the WorkOS user's
+# external_id on every /users/me when the two differ, so made-up ones would overwrite your
+# real dev account's on each page load. Reads dev only; the seed database must be fresh.
+local_copy_dev_identity() {
+    local tmp rc=0
+    tmp="$(mktemp -d)"
+    (
+        # shellcheck source=/dev/null
+        source "$HOME/.config/jt/environments.sh" >/dev/null && env_dev >/dev/null
+        dev_psql() {
+            PGPASSWORD="$PG_PASSWORD" PGSSLMODE=require PGCONNECT_TIMEOUT=10 \
+                psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DATABASE" -X -q -v ON_ERROR_STOP=1 "$@"
+        }
+        dev_psql -c "\copy (SELECT id, slug, name, datetime_created_utc FROM common.organization_role) TO '$tmp/role.tsv'" \
+            && dev_psql -c "\copy (SELECT id, name, type, external_idp_id, datetime_created_utc, whitelabeling_config, steering_algo_name, subscription, customer_type, currency, additional_features, partner_features, silver_enrolled_at, datetime_deletion_scheduled_utc, datetime_deletion_started_utc FROM common.organization) TO '$tmp/org.tsv'" \
+            && dev_psql -c "\copy (SELECT id, external_idp_id, email, datetime_created_utc FROM common.\"user\") TO '$tmp/user.tsv'" \
+            && dev_psql -c "\copy (SELECT organization_id, user_id, role_id, state, datetime_created_utc FROM common.organization_membership) TO '$tmp/membership.tsv'" \
+            && dev_psql -c "\copy (SELECT id, parent_organization_id, child_organization_id, datetime_created_utc FROM common.organization_relationship) TO '$tmp/relationship.tsv'"
+    ) || rc=1
+    # The migration seeds its own role rows with fresh ids; dev's replace them, since dev's
+    # memberships point at dev's role ids.
+    [ "$rc" -eq 0 ] && jolteon_psql "$LOCAL_JOLTEON_DB" <<SQL || rc=1
+BEGIN;
+DELETE FROM common.organization_role;
+\copy common.organization_role (id, slug, name, datetime_created_utc) FROM '$tmp/role.tsv'
+\copy common.organization (id, name, type, external_idp_id, datetime_created_utc, whitelabeling_config, steering_algo_name, subscription, customer_type, currency, additional_features, partner_features, silver_enrolled_at, datetime_deletion_scheduled_utc, datetime_deletion_started_utc) FROM '$tmp/org.tsv'
+\copy common."user" (id, external_idp_id, email, datetime_created_utc) FROM '$tmp/user.tsv'
+\copy common.organization_membership (organization_id, user_id, role_id, state, datetime_created_utc) FROM '$tmp/membership.tsv'
+\copy common.organization_relationship (id, parent_organization_id, child_organization_id, datetime_created_utc) FROM '$tmp/relationship.tsv'
+COMMIT;
+SQL
+    rm -rf "$tmp"
+    return "$rc"
+}
+
+# A site and a grid connection under one real dev org, with the assistant switched on there,
+# so a login into that org has something to show and something to ask about.
+local_seed_fixture() {
+    jolteon_psql "$LOCAL_JOLTEON_DB" -v org="$1" <<'SQL'
+BEGIN;
+INSERT INTO customers_v2.location (uuid, customer_uuid, name, latitude, longitude, country, zip_code, timezone, deleted)
+SELECT '00000000-0000-0000-0000-000000000010', o.id, 'Local Demo Site', 50.8503, 4.3517, 'BE', '1000', 'Europe/Brussels', false
+FROM common.organization o WHERE o.external_idp_id = :'org';
+INSERT INTO customers_v2.asset (uuid, customer_uuid, name, location_uuid, asset_type, deleted)
+SELECT '00000000-0000-0000-0000-000000000011', o.id, 'Local Grid Connection', '00000000-0000-0000-0000-000000000010', 'grid connection', false
+FROM common.organization o WHERE o.external_idp_id = :'org';
+-- On in Jolteon, not only in the mirror: the frontend decides whether to show the assistant
+-- from dashboard-api's copy of the flag, the service from the mirror's.
+UPDATE common.organization SET additional_features = array_append(coalesce(additional_features, '{}'), 'agentic_chat')
+WHERE external_idp_id = :'org' AND NOT ('agentic_chat' = ANY(coalesce(additional_features, '{}')));
+COMMIT;
+SQL
+}
+
+# Run one migration package quietly, showing its log only when it fails. The runner echoes
+# every statement, which buries the one line that matters.
+local_migrate() {
+    local root="$1" package="$2" log
+    shift 2
+    log="$(mktemp)"
+    if (cd "$root" && env "$@" uv run --quiet --package="$package-migrations" python migrations/runner.py "$package") >"$log" 2>&1; then
+        rm -f "$log"
+        return 0
+    fi
+    tail -20 "$log" >&2
+    rm -f "$log"
+    return 1
+}
+
+# How many sessions other than ours hold one of the seeded databases open — a running
+# `jt app run --local`, usually another worktree's.
+local_db_sessions() {
+    local n1 n2
+    n1="$(jolteon_psql postgres -Atc "SELECT count(*) FROM pg_stat_activity WHERE datname = '$LOCAL_JOLTEON_DB' AND backend_type = 'client backend' AND pid <> pg_backend_pid()" 2>/dev/null || echo 0)"
+    n2="$(agent_psql postgres -Atc "SELECT count(*) FROM pg_stat_activity WHERE datname = '$LOCAL_AGENT_DB' AND backend_type = 'client backend' AND pid <> pg_backend_pid()" 2>/dev/null || echo 0)"
+    echo $((n1 + n2))
+}
+
+cmd_db_seed() {
+    local org="" force=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --org) org="${2:-}"; [ -n "$org" ] || { echo "--org needs a WorkOS org id (org_…)" >&2; return 1; }; shift 2 ;;
+            --force) force=1; shift ;;
+            *) echo "Usage: jt db seed [--org <org_…>] [--force]" >&2; return 1 ;;
+        esac
+    done
+    local root; root="$(git rev-parse --show-toplevel 2>/dev/null)" \
+        || { echo "Error: run this from a Jolteon worktree." >&2; return 1; }
+    command -v psql >/dev/null 2>&1 || { echo "Error: psql not found." >&2; return 1; }
+    local_db_servers_up || return 1
+
+    # Always from scratch: the identities are copied with dev's own ids, which only land
+    # cleanly in an empty database, and a rebuild takes seconds. It does end whatever is
+    # connected, so refuse while something is.
+    local busy; busy="$(local_db_sessions)"
+    if [ "$busy" -gt 0 ] && [ "$force" -eq 0 ]; then
+        echo "Error: $busy session(s) still have $LOCAL_JOLTEON_DB/$LOCAL_AGENT_DB open — a running" >&2
+        echo "       'jt app run --local', maybe another worktree's. Stop it, or pass --force." >&2
+        return 1
+    fi
+    echo "Rebuilding $LOCAL_JOLTEON_DB and $LOCAL_AGENT_DB..."
+    jolteon_psql postgres -c "DROP DATABASE IF EXISTS $LOCAL_JOLTEON_DB WITH (FORCE)" -c "CREATE DATABASE $LOCAL_JOLTEON_DB OWNER jolteon" || return 1
+    agent_psql postgres -c "DROP DATABASE IF EXISTS $LOCAL_AGENT_DB WITH (FORCE)" -c "CREATE DATABASE $LOCAL_AGENT_DB OWNER agent" || return 1
+
+    echo "Migrating $LOCAL_JOLTEON_DB..."
+    local_migrate "$root" jolteon PG_HOST=127.0.0.1 PG_PORT=5432 PG_USER=jolteon PG_PASSWORD=energy \
+        PG_DATABASE="$LOCAL_JOLTEON_DB" || { echo "Error: the Jolteon migration failed." >&2; return 1; }
+
+    echo "Copying dev's organizations, users and memberships (needs Tailscale)..."
+    local_copy_dev_identity || { echo "Error: could not copy identities from the dev database." >&2; return 1; }
+
+    # The fixture goes under one of YOUR customer orgs, so the first login lands somewhere with
+    # data. Your dev account is found by JT_DEV_EMAIL, else your git email, else that email's
+    # name at companion.energy — a personal git email is common. --org picks another org.
+    if [ -z "$org" ]; then
+        local git_email dev_email emails
+        # Quotes stripped: these land inside SQL string literals.
+        git_email="$(git -C "$root" config user.email 2>/dev/null || true)"
+        git_email="${git_email//\'/}"
+        dev_email="${JT_DEV_EMAIL:-}"
+        dev_email="${dev_email//\'/}"
+        emails="'${dev_email,,}', '${git_email,,}', '${git_email%%@*}@companion.energy'"
+        org="$(jolteon_psql "$LOCAL_JOLTEON_DB" -Atc "SELECT o.external_idp_id FROM common.organization o JOIN common.organization_membership m ON m.organization_id = o.id JOIN common.\"user\" u ON u.id = m.user_id WHERE lower(u.email) IN (${emails,,}) AND o.type = 'customer' AND m.state = 'active' ORDER BY o.name LIMIT 1" 2>/dev/null || true)"
+    fi
+    local org_name=""
+    [ -n "$org" ] && org_name="$(jolteon_psql "$LOCAL_JOLTEON_DB" -Atc "SELECT name FROM common.organization WHERE external_idp_id = '${org//\'/}'" 2>/dev/null || true)"
+    if [ -n "$org_name" ]; then
+        echo "Adding the demo site and grid connection to '$org_name' ($org)..."
+        local_seed_fixture "$org" || return 1
+    else
+        echo "No customer org to put the demo site under: none active for your dev account (set"
+        echo "JT_DEV_EMAIL to its email), or --org names no dev org. Seeded without it."
+    fi
+
+    echo "Migrating $LOCAL_AGENT_DB..."
+    local_migrate "$root" agent AGENT_DATABASE_URL="postgresql+psycopg://agent:agent@localhost:5433/$LOCAL_AGENT_DB" \
+        || { echo "Error: the agent migration failed." >&2; return 1; }
+
+    echo "Mirroring identity into $LOCAL_AGENT_DB..."
+    local_mirror_identity "$LOCAL_JOLTEON_DB" "$LOCAL_AGENT_DB" || return 1
+
+    # Gateway-named, like every deployed catalog, so the seeded setup exercises the ids prd
+    # actually stores. Capabilities are left for the admin screen's refresh: the runtime
+    # infers the thinking shape from the id when they are absent.
+    agent_psql "$LOCAL_AGENT_DB" <<'SQL' || return 1
+INSERT INTO agent.model_catalog (model_id, provider, display_name, status, is_default) VALUES
+    ('anthropic/claude-sonnet-5', 'anthropic', 'claude-sonnet-5', 'enabled', true),
+    ('anthropic/claude-opus-5', 'anthropic', 'claude-opus-5', 'enabled', false),
+    ('anthropic/claude-haiku-4-5', 'anthropic', 'claude-haiku-4-5', 'enabled', false);
+SQL
+
+    echo ""
+    cmd_db_status
+    echo ""
+    echo "Now: jt app run --local --agent, and sign in with your dev account."
+}
+
+cmd_db_status() {
+    local row server db
+    for row in "jolteon:$LOCAL_JOLTEON_DB" "agent:$LOCAL_AGENT_DB"; do
+        server="${row%%:*}"; db="${row#*:}"
+        if ! pg_isready -h localhost -p "$([ "$server" = jolteon ] && echo 5432 || echo 5433)" -q; then
+            printf '  %-14s server down\n' "$db"
+            continue
+        fi
+        if ! local_db_exists "$server" "$db"; then
+            printf '  %-14s missing\n' "$db"
+            continue
+        fi
+        if [ "$server" = jolteon ]; then
+            printf '  %-14s %s\n' "$db" "$(jolteon_psql "$db" -Atc "SELECT 'rev ' || (SELECT string_agg(version_num, ',') FROM common.alembic_version) || ', ' || (SELECT count(*) FROM common.organization) || ' orgs, ' || (SELECT count(*) FROM common.\"user\") || ' users, ' || (SELECT count(*) FROM common.organization WHERE 'agentic_chat' = ANY(additional_features)) || ' with agentic_chat'" 2>&1 | head -1)"
+        else
+            printf '  %-14s %s\n' "$db" "$(agent_psql "$db" -Atc "SELECT 'rev ' || (SELECT string_agg(version_num, ',') FROM public.alembic_version) || ', ' || (SELECT count(*) FROM agent.organization) || ' orgs, ' || (SELECT count(*) FROM agent.app_user) || ' users, default model ' || coalesce((SELECT model_id FROM agent.model_catalog WHERE is_default), 'none')" 2>&1 | head -1)"
+        fi
+    done
+}
+
 prompt_env() {
     local default="$1"
     local default_num
@@ -900,20 +1184,20 @@ prompt_env() {
         dev)      default_num=1 ;;
         fork)     default_num=2 ;;
         prd_fork) default_num=3 ;;
-        prd)      default_num=4 ;;
+        local)    default_num=4 ;;
     esac
     echo "Select environment:" >&2
     echo "  1) dev       (writable)" >&2
     echo "  2) fork      (Tiger fork of dev — for migrations)" >&2
-    echo "  3) prd-fork  (Tiger fork of prd — real data, writable, throwaway)" >&2
-    echo "  4) prd       (read-only)" >&2
+    echo "  3) prd-fork  (Tiger fork of prd — real data, writable, throwaway; needs --as)" >&2
+    echo "  4) local     (seeded databases on this machine — 'jt db seed')" >&2
     local choice
     read -rp "Environment [$default_num]: " choice
     case "${choice:-$default_num}" in
         1|dev)               echo "dev" ;;
         2|fork)              echo "fork" ;;
         3|prd-fork|prd_fork) echo "prd_fork" ;;
-        4|prd)               echo "prd" ;;
+        4|local)             echo "local" ;;
         *)                   echo "Invalid choice" >&2; exit 1 ;;
     esac
 }
@@ -1784,7 +2068,7 @@ cmd_app_run() {
                 --agent) run_agent=1 ;;
                 *)
                     echo "Unknown argument: $_a"
-                    echo "Usage: jt app run [--dev|--fork|--prd] [--as <persona>] [--agent]"
+                    echo "Usage: jt app run [--local|--dev|--fork|--prd-fork] [--agent] [--as <persona>]"
                     exit 1
                     ;;
             esac
@@ -1793,6 +2077,24 @@ cmd_app_run() {
 
     if [ -z "$env" ]; then
         env="$(prompt_env dev)"
+    fi
+
+    # Production data comes from a fork. --prd sat on the read-only role, so nothing that
+    # writes could run there; a fork takes writes and is thrown away afterwards.
+    if [ "$env" = "prd" ]; then
+        echo "Error: 'jt app run --prd' is gone. Production data runs on a Tiger fork:" >&2
+        echo "       'jt app run --prd-fork --as root [--agent]'." >&2
+        exit 1
+    fi
+
+    # A fork of prd is entered through the auth bypass for now. Its users carry production
+    # WorkOS ids, so a real login would have to be a production one, and that is only safe
+    # once dashboard-api can be kept from writing to production WorkOS — which it cannot yet.
+    # Said up front, before a fork is taken for nothing.
+    if [ "$env" = "prd_fork" ] && [ -z "${PERSONA:-}" ]; then
+        echo "Error: --prd-fork needs a persona for now: --as root (or customer/ivarem, see" >&2
+        echo "       resolve_persona in ~/.config/jt/environments.sh)." >&2
+        exit 1
     fi
 
     # Refuse rather than clobber: the implicit stop below kills by process group, so a
@@ -1827,6 +2129,7 @@ cmd_app_run() {
     # no env_* runs, PG_* stays unset, and the first thing to read it fails somewhere far
     # from the cause. The `*)` arm makes that loud instead.
     case "$env" in
+        local)    env_local || exit 1 ;;
         dev)      env_dev ;;
         # Neither fork is an env_* function: a fork's host AND port change every time one
         # is taken, so both are resolved from the Tiger CLI rather than maintained by hand.
@@ -1834,24 +2137,26 @@ cmd_app_run() {
         # a pair has to come from ONE environment, so one call resolves both halves.
         fork)     fork_env dev || exit 1 ;;
         prd_fork) fork_env prd || exit 1 ;;
-        prd)      env_prd ;;
         *)        echo "Error: no env_$env in $env_file." >&2; exit 1 ;;
     esac
 
-    # Persona override (auth bypass), layered on top of the env above so it wins
-    # over whatever identity that env bundled. resolve_persona (in environments.sh)
-    # errors on an undefined (env, persona) combo — abort rather than start as the
-    # wrong / a non-existent user.
+    # Persona override (auth bypass) — opt-in, except on --prd-fork (above), and for when nobody
+    # can type a password (an agent driving the browser). Otherwise you sign in for real.
+    # resolve_persona (in
+    # environments.sh) errors on an undefined (env, persona) combo — abort rather than start as
+    # the wrong / a non-existent user. --local resolves through the dev rows: its seed carries
+    # dev's own identities.
     if [ -n "${PERSONA:-}" ]; then
-        resolve_persona "$env" "$PERSONA" || {
-            echo "Aborting: persona '$PERSONA' is not defined for env '$env' in $env_file."
+        local persona_env="$env"
+        [ "$env" = "local" ] && persona_env="dev"
+        resolve_persona "$persona_env" "$PERSONA" || {
+            echo "Aborting: persona '$PERSONA' is not defined for env '$persona_env' in $env_file."
             exit 1
         }
     fi
 
-    # Whenever the bypass is on (a persona, or env_prd), pin COMPANION_ENV=local so
-    # the backend's DISABLE_AUTH gate activates and its startup assert is satisfied,
-    # independent of which DB the env flag selected.
+    # Whenever the bypass is on, pin COMPANION_ENV=local so the backend's DISABLE_AUTH gate
+    # activates and its startup assert is satisfied, independent of which DB the env selected.
     if [ "${DISABLE_AUTH_RAW:-}" = "true" ]; then
         export COMPANION_ENV=local
     fi
@@ -1861,12 +2166,19 @@ cmd_app_run() {
     echo "  Frontend: http://localhost:5173"
     echo "  Backend:  http://localhost:8000"
     if [ "$run_agent" -eq 1 ]; then
-        echo "  Analytics API: http://localhost:8122  (DB: $env)"
-        echo "  Analytics MCP: http://localhost:8003/mcp"
-        echo "  Agent service: http://localhost:8140"
-        echo "  LiteLLM:       http://localhost:4000  (local gateway)"
+        echo "  Analytics API:  http://localhost:8122  (DB: $env)"
+        echo "  Analytics MCP:  http://localhost:8003/mcp"
+        echo "  Management MCP: http://localhost:8002/mcp  (-> local backend)"
+        echo "  Agent service:  http://localhost:8140"
+        echo "  LiteLLM:        http://localhost:4000  (local gateway)"
     fi
     echo ""
+    if [ "${DISABLE_AUTH_RAW:-}" = "true" ]; then
+        echo "Signed in as persona '$PERSONA' (auth bypass). The assistant ignores the persona"
+        echo "and acts as a fixed root admin."
+    else
+        echo "Sign in with your dev account."
+    fi
     echo "Viewing from another machine (e.g. your Mac)? Run 'jt app forward' there"
     echo "to tunnel these ports, then open the URLs above."
     echo ""
@@ -1876,8 +2188,14 @@ cmd_app_run() {
     # and loop — flooding the terminal with "Stopping services...".
     trap 'trap - INT TERM; echo ""; echo "Stopping services..."; kill 0' INT TERM
 
+    # dashboard-api publishes its org/user/membership snapshot to the Service Bus its .env
+    # names — dev's — and agent-service in dev mirrors whatever arrives. From any database
+    # but dev's own that pushes foreign identities (prd's, a fork's, the seed's) into dev's
+    # assistant, so only --dev keeps it. Nothing else in dashboard-api uses Service Bus.
+    local -a api_env=()
+    [ "$env" != "dev" ] && api_env+=(SERVICE_BUS_CONNECTION_STRING=)
     (cd services/dashboard-api 2>/dev/null || cd "$REPO/services/dashboard-api"
-     uv run uvicorn app.main:app --host 0.0.0.0 --port 8000) &
+     env "${api_env[@]}" uv run uvicorn app.main:app --host 0.0.0.0 --port 8000) &
 
     local vite_env=""
     if [ "${DISABLE_AUTH_RAW:-}" = "true" ]; then
@@ -1915,8 +2233,13 @@ cmd_app_run() {
             # the pair from the Tiger CLI, which is the point — the two forks have to come
             # from the same environment, so one function resolves both rather than two
             # hand-maintained ones that can drift apart.
+            #
+            # --local keeps it on this machine, beside its seeded Jolteon database (see
+            # "Local databases"), and wins over any agent_env_local in environments.sh.
             if [ "$env" = "fork" ] || [ "$env" = "prd_fork" ]; then
                 :
+            elif [ "$env" = "local" ]; then
+                agent_env_docker "$LOCAL_AGENT_DB"
             elif command -v "agent_env_$env" >/dev/null 2>&1; then
                 "agent_env_$env"
             else
@@ -1924,11 +2247,9 @@ cmd_app_run() {
                 exit 1
             fi
 
-            # An EMPTY host is a deliberate choice, not a gap: agent-service then uses its
-            # DATABASE_URL (the docker Postgres), which is right because that database holds
-            # only this service's own state — conversations, messages, runs — and because a
-            # deployed environment's model_catalog is gateway-named and unusable without the
-            # gateway. A still-templated REPLACE_* host is a genuine gap and stops the stack.
+            # An EMPTY host means agent-service falls back to its DATABASE_URL (the docker
+            # Postgres); a local one names that server explicitly. A still-templated
+            # REPLACE_* host is a genuine gap and stops the stack.
             case "${AGENT_PG_HOST:-}" in
                 REPLACE_*)
                     echo ""
@@ -1990,32 +2311,58 @@ cmd_app_run() {
                  COMPANION_ENV="local" \
                  uv run uvicorn app.main:app --port 8003) &
 
-            (cd "$agent_dir"
-             env ANALYTICS_MCP_URL="http://localhost:8003/mcp" \
-                 DISABLE_AUTH="$svc_disable_auth" \
-                 LITELLM_BASE_URL="$agent_gateway_url" \
-                 LITELLM_API_KEY="$agent_gateway_key" \
-                 PG_HOST="${AGENT_PG_HOST:-}" \
-                 PG_PORT="${AGENT_PG_PORT:-5432}" \
-                 PG_USER="${AGENT_PG_USER:-}" \
-                 PG_PASSWORD="${AGENT_PG_PASSWORD:-}" \
-                 PG_DATABASE="${AGENT_PG_DATABASE:-tsdb}" \
-                 PG_SSLMODE="${AGENT_PG_SSLMODE:-require}" \
-                 uv run uvicorn app.main:app --port 8140) &
+            # management-mcp against THIS dashboard-api, not a deployed one: its tools are
+            # dashboard-api's own routes, so this is what exercises a route change end to
+            # end. Under the bypass it forwards `dev-token`, which the bypassed backend ignores.
+            local mcp_dir api_dir
+            mcp_dir="$(cd services/management-mcp 2>/dev/null && pwd)" || mcp_dir="$REPO/services/management-mcp"
+            api_dir="$(cd services/dashboard-api 2>/dev/null && pwd)" || api_dir="$REPO/services/dashboard-api"
+            if mcp_ensure_spec "$mcp_dir" "$api_dir"; then
+                (cd "$mcp_dir"
+                 env DASHBOARD_API_BASE_URL="http://localhost:8000" \
+                     DISABLE_AUTH="$svc_disable_auth" \
+                     MCP_BASE_URL="http://localhost:8002" \
+                     COMPANION_ENV="local" \
+                     uv run uvicorn app.main:app --port 8002) &
+            fi
 
-            # The local LiteLLM gateway (:4000). agent-service picks its client by whether
-            # LITELLM_BASE_URL is set — gateway when it is, direct Anthropic otherwise —
-            # and the direct client passes the catalog's model_id through verbatim. dev's
-            # catalog is gateway-named (anthropic/claude-opus-5), which Anthropic 404s, so
-            # without this every chat turn dies on model resolution. Started with the agent
-            # stack rather than by hand, because it is not optional once the agent DB is
-            # dev's. Config lists BOTH naming schemes, so it also serves the local docker
-            # catalog's unprefixed ids.
+            # Always the local backend and the local frontend's origin, whatever the .env says:
+            # this stack exists so every hop is the code in this checkout. Intake writes are
+            # allowed explicitly because every backend here is writable, and a worktree whose
+            # .env is the agent-local-prod store's would otherwise inherit its write guard.
+            local -a agent_env=(
+                ANALYTICS_MCP_URL="http://localhost:8003/mcp"
+                DASHBOARD_API_URL="http://localhost:8000"
+                DASHBOARD_API_WRITES_DISABLED="false"
+                CORS_ORIGINS="http://localhost:5173"
+                COMPANION_ENV="local"
+                DISABLE_AUTH="$svc_disable_auth"
+                LITELLM_BASE_URL="$agent_gateway_url"
+                LITELLM_API_KEY="$agent_gateway_key"
+                PG_HOST="${AGENT_PG_HOST:-}"
+                PG_PORT="${AGENT_PG_PORT:-5432}"
+                PG_USER="${AGENT_PG_USER:-}"
+                PG_PASSWORD="${AGENT_PG_PASSWORD:-}"
+                PG_DATABASE="${AGENT_PG_DATABASE:-tsdb}"
+                PG_SSLMODE="${AGENT_PG_SSLMODE:-require}"
+            )
+            # A local agent database keeps attachment bytes local too (Azurite, from
+            # agent-service's own compose file), so rows and blobs always live together.
+            local agent_db_local=0 azurite=""
+            case "${AGENT_PG_HOST:-}" in ""|localhost|127.0.0.1) agent_db_local=1 ;; esac
+            if [ "$agent_db_local" -eq 1 ] && [ -f "$agent_dir/.env.example" ]; then
+                azurite="$(grep -m1 '^STORAGE_CONNECTION_STRING=.*devstoreaccount1' "$agent_dir/.env.example" || true)"
+            fi
+            [ -n "$azurite" ] && agent_env+=("$azurite")
+
+            (cd "$agent_dir"
+             env "${agent_env[@]}" uv run uvicorn app.main:app --port 8140) &
+
             # Catch the split-brain that cost a long debugging session: the agent DB on
             # dev while attachment BYTES still go to the Azurite emulator. Uploads appear
             # to work, but every agent.attachment row written to dev names a blob_path
             # that resolves on this laptop and nowhere else.
-            if [ -n "${AGENT_PG_HOST:-}" ] && [ -f "$agent_dir/.env" ] \
+            if [ "$agent_db_local" -eq 0 ] && [ -f "$agent_dir/.env" ] \
                && grep -q 'devstoreaccount1' "$agent_dir/.env" 2>/dev/null; then
                 echo ""
                 echo "⚠  Agent DB is remote ($AGENT_PG_HOST) but attachments still go to"
@@ -2076,7 +2423,7 @@ cmd_app_run() {
 app_ports_owned_elsewhere() {
     local here port pids pid cwd
     here="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-    for port in 5173 8000 8003 8122 8140 4000; do
+    for port in 5173 8000 8002 8003 8122 8140 4000; do
             # -sTCP:LISTEN, matching cmd_app_stop: a bare lsof also matches CLIENT
             # sockets, so a browser tab pointed at 5173 would read as owning it.
             pids=$(lsof -ti :"$port" -sTCP:LISTEN 2>/dev/null || true)
@@ -2108,11 +2455,11 @@ cmd_app_stop() {
     # localhost:5173 holds an established connection, so it'd be returned here and
     # we'd kill -9 its whole process group — nuking the entire browser. Restrict
     # to listening sockets so we only ever kill the dev servers themselves.
-    # 8000/5173 = backend/frontend; 8122/8003/8140/4000 = the '--agent' stack
-    # (analytics-api / analytics-mcp / agent-service / local LiteLLM gateway). The
+    # 8000/5173 = backend/frontend; 8002/8122/8003/8140/4000 = the '--agent' stack
+    # (management-mcp / analytics-api / analytics-mcp / agent-service / local LiteLLM gateway). The
     # agent-service's docker Postgres (5433) and Azurite (10000) are deliberately left
     # up — stop them with 'docker compose down'.
-    for port in 8000 5173 8122 8003 8140 4000; do
+    for port in 8000 5173 8002 8122 8003 8140 4000; do
         for pid in $(lsof -ti :"$port" -sTCP:LISTEN 2>/dev/null); do
             pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')
             [ -n "$pgid" ] && [ "$pgid" != "$cur_pgid" ] && pgids="$pgids $pgid"
@@ -2132,7 +2479,7 @@ cmd_app_stop() {
 
     # Wait for the kernel to actually release the ports before returning, so the
     # following 'jt app run' binds cleanly.
-    for port in 8000 5173 8122 8003 8140 4000; do
+    for port in 8000 5173 8002 8122 8003 8140 4000; do
         for i in $(seq 1 50); do
             lsof -ti :"$port" -sTCP:LISTEN >/dev/null 2>&1 || break
             sleep 0.1
@@ -2341,6 +2688,33 @@ cmd_pulse_cors() {
 
 # ─── MCP commands ──────────────────────────────────────────
 
+# management-mcp's tools ARE dashboard-api's routes, read from app/openapi_spec.json — a
+# gitignored file generated from dashboard-api's code (the Docker build does the same).
+# Regenerated when missing or older than any dashboard-api source file, so the MCP serves
+# the routes of the dashboard-api beside it rather than whatever they were when the file was
+# first made. A few seconds, and only when something changed.
+mcp_spec_fresh() {
+    local spec="$1/app/openapi_spec.json"
+    [ -f "$spec" ] && [ -z "$(find "$2/app" -name '*.py' -newer "$spec" -print -quit 2>/dev/null)" ]
+}
+
+mcp_ensure_spec() {
+    local mcp_dir="$1" api_dir="$2"
+    mcp_spec_fresh "$mcp_dir" "$api_dir" && return 0
+    echo "Generating management-mcp's OpenAPI spec from dashboard-api..."
+    if ! (cd "$api_dir" && \
+            GOOGLE_GEOCODING_API_KEY="${GOOGLE_GEOCODING_API_KEY:-x}" \
+            WORKOS_CLIENT_ID="${WORKOS_CLIENT_ID:-x}" \
+            WORKOS_CLIENT_SECRET="${WORKOS_CLIENT_SECRET:-x}" \
+            FLUVIUS_CLIENT_SECRET="${FLUVIUS_CLIENT_SECRET:-x}" \
+            FLUVIUS_SUBSCRIPTION_KEY="${FLUVIUS_SUBSCRIPTION_KEY:-x}" \
+            DAGSTER_URL="${DAGSTER_URL:-http://x}" \
+            PYTHONPATH=. uv run --quiet python ../management-mcp/scripts/generate_openapi_spec.py >/dev/null); then
+        echo "Warning: could not generate $mcp_dir/app/openapi_spec.json — skipping management-mcp." >&2
+        return 1
+    fi
+}
+
 cmd_mcp_run() {
     # --as is accepted (via parse_env_flag) because the analytics chain needs a
     # persona: analytics-api only bypasses auth when DISABLE_AUTH_RAW is on, and
@@ -2361,7 +2735,7 @@ cmd_mcp_run() {
                     ;;
                 *)
                     echo "Unknown argument: $_a"
-                    echo "Usage: jt mcp run [--analytics] [--dev|--fork|--prd] [--as <persona>] [--port N]"
+                    echo "Usage: jt mcp run [--analytics] [--local|--dev|--fork|--prd] [--as <persona>] [--port N]"
                     exit 1
                     ;;
             esac
@@ -2379,16 +2753,11 @@ cmd_mcp_run() {
 
     [ -z "$port" ] && port="8002"
 
-    local mcp_dir
+    local mcp_dir api_dir
     mcp_dir="$(cd services/management-mcp 2>/dev/null && pwd)" || mcp_dir="$REPO/services/management-mcp"
-    local spec_file="$mcp_dir/app/openapi_spec.json"
+    api_dir="$(cd services/dashboard-api 2>/dev/null && pwd)" || api_dir="$REPO/services/dashboard-api"
 
-    # Generate OpenAPI spec if missing
-    if [ ! -f "$spec_file" ]; then
-        echo "OpenAPI spec not found, generating..."
-        local api_dir
-        api_dir="$(cd services/dashboard-api 2>/dev/null && pwd)" || api_dir="$REPO/services/dashboard-api"
-
+    if ! mcp_spec_fresh "$mcp_dir" "$api_dir"; then
         # Source env config for DB creds (needed by dashboard-api import)
         local env_file="$HOME/.config/jt/environments.sh"
         if [ -f "$env_file" ]; then
@@ -2396,15 +2765,7 @@ cmd_mcp_run() {
             source "$env_file"
             env_dev  # dev creds are fine for spec generation
         fi
-
-        (cd "$api_dir" && \
-            GOOGLE_GEOCODING_API_KEY="${GOOGLE_GEOCODING_API_KEY:-x}" \
-            WORKOS_CLIENT_ID="${WORKOS_CLIENT_ID:-x}" \
-            WORKOS_CLIENT_SECRET="${WORKOS_CLIENT_SECRET:-x}" \
-            FLUVIUS_CLIENT_SECRET="${FLUVIUS_CLIENT_SECRET:-x}" \
-            FLUVIUS_SUBSCRIPTION_KEY="${FLUVIUS_SUBSCRIPTION_KEY:-x}" \
-            DAGSTER_URL="${DAGSTER_URL:-http://x}" \
-            PYTHONPATH=. uv run python ../management-mcp/scripts/generate_openapi_spec.py)
+        mcp_ensure_spec "$mcp_dir" "$api_dir" || exit 1
     fi
 
     # Stop any existing MCP server on this port
@@ -2480,6 +2841,7 @@ mcp_run_analytics() {
     # no env_* runs, PG_* stays unset, and the first thing to read it fails somewhere far
     # from the cause. The `*)` arm makes that loud instead.
     case "$env" in
+        local)    env_local || exit 1 ;;
         dev)      env_dev ;;
         # Neither fork is an env_* function: a fork's host AND port change every time one
         # is taken, so both are resolved from the Tiger CLI rather than maintained by hand.
@@ -2491,9 +2853,12 @@ mcp_run_analytics() {
         *)        echo "Error: no env_$env in $env_file." >&2; exit 1 ;;
     esac
 
+    # --local resolves personas through the dev rows: its seed carries dev's own identities.
     if [ -n "${PERSONA:-}" ]; then
-        resolve_persona "$env" "$PERSONA" || {
-            echo "Aborting: persona '$PERSONA' is not defined for env '$env' in $env_file."
+        local persona_env="$env"
+        [ "$env" = "local" ] && persona_env="dev"
+        resolve_persona "$persona_env" "$PERSONA" || {
+            echo "Aborting: persona '$PERSONA' is not defined for env '$persona_env' in $env_file."
             exit 1
         }
     fi
@@ -2632,6 +2997,11 @@ agent_export_workos() {
 # and running them on every launch hides a broken database behind a slow start.
 agent_ensure_db() {
     local agent_dir="$1"
+    # Already answering (Postgres, and Azurite on :10000) needs no docker at all — which also
+    # keeps a shell without docker-socket access from warning about a database that is up.
+    if pg_isready -h localhost -p 5433 -q && (exec 3<>/dev/tcp/127.0.0.1/10000) 2>/dev/null; then
+        return 0
+    fi
     command -v docker >/dev/null 2>&1 || { echo "Warning: docker not found — agent DB unavailable."; return 0; }
     docker compose -f "$agent_dir/compose.yaml" up -d --wait >/dev/null 2>&1 \
         || docker compose -f "$agent_dir/compose.yaml" up -d >/dev/null 2>&1 \
@@ -2641,16 +3011,18 @@ agent_ensure_db() {
 
 # Start the local LiteLLM gateway on :4000.
 #
-# The Anthropic key comes from services/agent-service/.env — the same file agent-service
-# reads — rather than a second copy, so there is one place to rotate it. Backgrounded like
-# the other services, so a failure here leaves the rest of the stack up.
+# The Anthropic key is the exported one (environments.sh), else services/agent-service/.env —
+# the same file agent-service reads — so there is no second copy to rotate. The exported one
+# wins because a worktree's .env can carry an empty ANTHROPIC_API_KEY= line, which used to
+# override a perfectly good key. Backgrounded like the other services, so a failure here
+# leaves the rest of the stack up.
 agent_litellm_start() {
-    local agent_dir="$1" key=""
-    if [ -f "$agent_dir/.env" ]; then
+    local agent_dir="$1" key="${ANTHROPIC_API_KEY:-}"
+    if [ -z "$key" ] && [ -f "$agent_dir/.env" ]; then
         key="$(sed -n 's/^ANTHROPIC_API_KEY=//p' "$agent_dir/.env" | head -1)"
     fi
     if [ -z "$key" ]; then
-        echo "Warning: no ANTHROPIC_API_KEY in $agent_dir/.env — LiteLLM will 401 on every turn."
+        echo "Warning: no ANTHROPIC_API_KEY exported or in $agent_dir/.env — LiteLLM will 401 on every turn."
     fi
     # `uv run --with` resolves litellm into a cached ephemeral environment; the first run
     # after a cache clear takes a minute, later ones are instant. Nothing to install by hand.
@@ -2698,7 +3070,9 @@ agent_ensure_env() {
             echo "Warning: no .env or .env.example in $agent_dir."
         fi
     fi
-    if ! grep -qE '^ANTHROPIC_API_KEY=.+' "$env_file" 2>/dev/null; then
+    # An exported key (environments.sh) counts: it outranks the .env for agent-service, and
+    # it is what the gateway uses.
+    if [ -z "${ANTHROPIC_API_KEY:-}" ] && ! grep -qE '^ANTHROPIC_API_KEY=.+' "$env_file" 2>/dev/null; then
         echo ""
         echo "⚠  ANTHROPIC_API_KEY is not set in $env_file"
         echo "   Add your key there before using the chat:"
@@ -3126,26 +3500,27 @@ PR (review an existing pull request):
                                        argument.
 
 App (backend + frontend):
-  jt app run [--dev|--fork|--prd-fork|--prd] [--as <persona>] [--agent]
-                                       Start backend + frontend (default: dev).
-                                       --as <persona> bypasses login as that persona
-                                       (root/partner/customer/…, defined in
-                                       ~/.config/jt/environments.sh) against the env's DB.
+  jt app run [--local|--dev|--fork|--prd-fork] [--agent] [--as <persona>]
+                                       Start backend + frontend (default: dev). You sign in
+                                       with your real dev account on http://localhost:5173,
+                                       except on --prd-fork.
+                                       --local runs on the seeded databases ('jt db seed'),
+                                       which carry dev's identities, so the dev login works.
                                        --fork / --prd-fork run against a throwaway Tiger
                                        fork of dev / of PRODUCTION: writable, auto-deleted.
                                        Both resolve the fork pair from the Tiger CLI and
                                        offer to take a fresh one if the recorded pair has
-                                       expired, so there is nothing to set up first
-                                       ('jt fork', below).
-                                       --agent also starts the agent-workflow stack:
-                                       analytics-api (:8122) on the SAME database,
-                                       analytics-mcp (:8003), agent-service (:8140), and the
-                                       invoice reconciliation worker on that same database.
-                                       Pair with --as so the MCP's data source is
-                                       auth-bypassed against that DB, e.g.
-                                       'jt app run --dev --as root --agent'. The invoice
-                                       worker is skipped on --prd (it writes; use
-                                       --prd-fork instead).
+                                       expired ('jt fork', below). --prd-fork needs --as for
+                                       now: a real login there would be a production one.
+                                       --agent also starts the agent-workflow stack, every
+                                       hop local: analytics-api (:8122) on the SAME database,
+                                       analytics-mcp (:8003), management-mcp (:8002) on this
+                                       backend, agent-service (:8140), the LiteLLM gateway
+                                       (:4000), and the invoice reconciliation worker.
+                                       --as <persona> is the auth bypass (personas in
+                                       ~/.config/jt/environments.sh): required on --prd-fork,
+                                       optional elsewhere (an agent driving the browser). The
+                                       assistant ignores it and acts as a fixed root admin.
   jt app stop                          Stop backend + frontend (+ the --agent stack;
                                        the agent docker DB is left running)
   jt app forward [--host <ssh-host>]   Tunnel app ports from another machine
@@ -3155,7 +3530,7 @@ App (backend + frontend):
 MCP:
   jt mcp run [--dev|--fork|--prd] [--port N]  Start the management MCP
                                        (default: --dev, port 8002)
-  jt mcp run --analytics [--dev|--fork|--prd] [--as <persona>] [--port N]
+  jt mcp run --analytics [--local|--dev|--fork|--prd] [--as <persona>] [--port N]
                                        Start the analytics MCP (:8003) plus the
                                        analytics-api (:8122) it queries, against
                                        the env's database. Pair with --as so the
@@ -3199,6 +3574,18 @@ Fork (a throwaway Tiger copy of a real database, writable):
 
     gh workflow run tiger_fork.yaml -f project=jolteon       -f environment=prd -f duration=6h
     gh workflow run tiger_fork.yaml -f project=agent_service -f environment=prd -f duration=6h
+
+Local databases (docker: Jolteon on :5432, agent-service on :5433):
+  jt db seed [--org <org_…>] [--force] Rebuild jolteon_seed + agent_seed from scratch:
+                                       migrations; dev's orgs, users and memberships with
+                                       their real ids (needs Tailscale); a demo site and
+                                       grid connection with the assistant on, under your
+                                       first customer org (by git email) or --org; the
+                                       agent's identity mirror and a gateway-named model
+                                       catalog. Refuses while something has them open
+                                       (--force ends it). Then 'jt app run --local --agent'.
+  jt db status                         Each seeded database: migration revision, orgs and
+                                       users, default model.
 
 Agent (the "My Companion" in-product AI assistant):
   jt agent run [--port N]              Start agent-service (default port 8140). Brings up
@@ -3256,9 +3643,9 @@ Examples:
   jt worktree create feat/battery-charts
   jt worktree checkout feat/partner-portal-v1
   jt wt open feat/battery-charts
-  jt app run --prd
-  jt app run --dev --as partner
-  jt app run --dev --as root --agent
+  jt app run --dev --agent
+  jt db seed && jt app run --local --agent
+  jt app run --prd-fork --as root --agent
   jt app forward
   jt mcp run --dev
   jt mcp run --prd --port 9000
@@ -3355,6 +3742,16 @@ dispatch_fork() {
     esac
 }
 
+dispatch_db() {
+    local verb="${1:-status}"
+    shift 2>/dev/null || true
+    case "$verb" in
+        seed)      cmd_db_seed "$@" ;;
+        status|ls) cmd_db_status ;;
+        *)    echo "Unknown db verb: $verb"; echo "Run 'jt help' for usage."; exit 1 ;;
+    esac
+}
+
 dispatch_pulse() {
     local verb="${1:-}"
     shift 2>/dev/null || true
@@ -3429,6 +3826,7 @@ case "$noun" in
     agent)          dispatch_agent "$@" ;;
     invoice)        dispatch_invoice "$@" ;;
     fork)           dispatch_fork "$@" ;;
+    db)             dispatch_db "$@" ;;
     pulse)          dispatch_pulse "$@" ;;
     browser)        dispatch_browser "$@" ;;
     sdk)            dispatch_sdk "$@" ;;
