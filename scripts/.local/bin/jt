@@ -212,7 +212,10 @@ setup_worktree_fast() {
     local target_dir="$1"
 
     echo "Copying environment files..."
-    (cd "$REPO" && find . \( -name node_modules -o -name .venv -o -name .git -o -name .data -o -name .emdash \) -prune -o -name '.env' -print) | while read -r envfile; do
+    # .claude and .emdash hold other tools' worktrees. Walking them copies every
+    # worktree's .env into this one — and into itself when the target is one of
+    # them, so each run nests the copies a level deeper.
+    (cd "$REPO" && find . \( -name node_modules -o -name .venv -o -name .git -o -name .data -o -name .emdash -o -name .claude \) -prune -o -name '.env' -print) | while read -r envfile; do
         if [ -f "$REPO/$envfile" ]; then
             mkdir -p "$target_dir/$(dirname "$envfile")"
             cp "$REPO/$envfile" "$target_dir/$envfile"
@@ -230,7 +233,7 @@ setup_worktree_fast() {
     local d
     for d in .claude .cursor .vscode .compound-engineering; do
         if [ -d "$REPO/$d" ] && [ ! -d "$target_dir/$d" ]; then
-            cp -r "$REPO/$d" "$target_dir/$d"
+            rsync -a --exclude=/worktrees/ "$REPO/$d/" "$target_dir/$d/"
             echo "  copied $d/"
         fi
     done
